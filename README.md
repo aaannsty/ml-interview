@@ -1849,3 +1849,124 @@ Writing a doc for ML tips and techniques as a glance
 * **GPU Opt:** Training LSTMs benefits significantly from GPUs.
 * **Math/Subtleties:** AWD-LSTM architecture, discriminative fine-tuning, slanted triangular learning rates, gradual unfreezing.
 * **SOTA Improvement:** Paved the way for transfer learning in NLP. While specific techniques differ, the core idea of pre-training followed by fine-tuning is central to current SOTA models like BERT and GPT.
+
+## Image and Computer Vision
+
+*Goal: Enable computers to "see", interpret, and understand visual information from images and videos.*
+
+---
+
+### 1. Core Tasks Overview
+
+* **Image Recognition (Classification):** Assigning one or more labels to an *entire* image based on its content (e.g., classifying an image as containing a "cat", "dog", or "landscape").
+* **Object Detection:** Identifying *instances* of objects within an image and localizing them, typically by drawing **bounding boxes** around each detected object and assigning a class label to each box (e.g., finding all "cars" and "pedestrians" in a street scene image and drawing boxes around them).
+* **Image Segmentation:** Classifying each *pixel* in an image.
+    * **Semantic Segmentation:** Assigns each pixel to a category (e.g., all pixels belonging to "road", "sky", "car").
+    * **Instance Segmentation:** Assigns each pixel to a specific object instance (e.g., distinguishing between "car 1", "car 2", "person 1").
+* **Other Tasks:** Face Recognition, Pose Estimation, Image Generation, Video Analysis, Scene Understanding, Optical Character Recognition (OCR).
+
+---
+
+### 2. Pattern Recognition in Computer Vision
+
+* **Explanation:** A foundational concept in CV. It involves identifying patterns (arrangements of features, textures, shapes, colors) in visual data to classify or interpret images. Many CV techniques are essentially forms of pattern recognition.
+* **Techniques:** Can range from simple template matching and statistical analysis of pixel intensities/textures to complex machine learning classifiers (SVM, KNN) and deep learning models (CNNs) that learn hierarchical patterns automatically.
+* **Relevance:** Underpins tasks like object recognition (recognizing patterns defining objects), texture analysis, feature detection (SIFT, SURF, ORB find keypoint patterns), and medical image analysis (detecting disease patterns).
+* **Supervised vs. Unsupervised:** Can be supervised (training on labeled patterns) or unsupervised (discovering recurring patterns/clusters in unlabeled visual data).
+
+---
+
+### 3. Convolutional Neural Networks (CNN / ConvNet)
+
+* **Recap:** As detailed in "Deep Learning", CNNs are the cornerstone architecture for modern computer vision. Their structure with convolutional layers (feature extraction via filters), pooling layers (downsampling/invariance), and fully connected layers is highly effective at learning hierarchical spatial features directly from pixel data.
+* **Relevance in CV:** Powers state-of-the-art performance in image classification, object detection, segmentation, and many other vision tasks. Architectures like LeNet, AlexNet, VGG, GoogLeNet, ResNet, DenseNet represent key milestones.
+* **Libraries:** `TensorFlow`/`Keras`, `PyTorch`.
+* **GPU Opt:** Essential for training and often inference due to the computationally intensive nature of convolutions on large datasets.
+
+---
+
+### 4. Object Detection
+
+* **Explanation:** A core CV task aiming to determine *where* objects are in an image (localization via bounding boxes) and *what* those objects are (classification).
+* **Approaches:**
+    * **Two-Stage Detectors:** First propose regions of interest (RoIs) likely to contain objects, then classify objects within those regions (e.g., R-CNN, Fast R-CNN, Faster R-CNN, Mask R-CNN). Generally more accurate but slower.
+    * **Single-Stage Detectors:** Directly predict bounding boxes and class probabilities in a single pass over the image (e.g., YOLO, SSD - Single Shot MultiBox Detector). Generally faster, suitable for real-time applications.
+* **Tricks & Treats:** Handling objects at different scales and aspect ratios (using techniques like anchor boxes or feature pyramids). Balancing speed and accuracy. Requires datasets with bounding box annotations.
+* **Caveats/Questions:** Occlusion, small objects, dense scenes pose challenges. Choosing the right model architecture depends on application needs (speed vs. accuracy).
+* **Evaluation Metrics:**
+    * **Intersection over Union (IoU):** Measures overlap between predicted bounding box and ground truth box. Used to determine if a detection is a True Positive (TP). $IoU = \frac{\text{Area of Overlap}}{\text{Area of Union}}$. A threshold (e.g., 0.5) is typically set.
+    * **Precision & Recall:** Calculated based on TPs, False Positives (FP - incorrect detections or detections with IoU < threshold), and False Negatives (FN - missed objects).
+    * **Average Precision (AP):** Area under the Precision-Recall curve for a specific class. Summarizes performance across different confidence thresholds.
+    * **Mean Average Precision (mAP):** The average AP across all object classes. Often reported at a specific IoU threshold (e.g., mAP@0.5) or averaged over multiple thresholds (e.g., COCO standard mAP [0.5:0.95]). This is the standard metric for comparing object detectors.
+* **Libraries:** `TensorFlow Object Detection API`, `Detectron2` (PyTorch), `MMDetection`, `Ultralytics` (YOLO), `OpenCV` (DNN module).
+* **GPU Opt:** Essential for training deep learning detectors. Inference also benefits significantly from GPUs, especially for real-time detection.
+* **SOTA Improvement:** YOLO family (v5, v7, v8, etc.), EfficientDet, Transformers for Object Detection (DETR variants) are pushing boundaries in speed and accuracy.
+
+---
+
+### 5. YOLO (You Only Look Once)
+
+* **Explanation:** A family of popular real-time, single-stage object detection models. Divides the input image into a grid. Each grid cell is responsible for predicting bounding boxes (coordinates, confidence score) and class probabilities for objects whose center falls within that cell. Performs detection in a single forward pass of the network.
+* **Evolution:** YOLO has seen numerous versions (YOLOv1 to YOLOv8, YOLO-NAS, etc.), with each iteration typically improving accuracy, speed, and the ability to detect smaller objects (e.g., via anchor boxes, feature pyramid networks, improved backbones like Darknet or CSPNet).
+* **Tricks & Treats:** Very fast, suitable for real-time applications (video). Open source implementations readily available. Good balance of speed and accuracy.
+* **Caveats/Questions:** Historically struggled more with small objects compared to two-stage detectors (though much improved in later versions). Localization accuracy might be slightly lower than top two-stage methods. Performance depends on the specific version and backbone used.
+* **Python (Conceptual using `Ultralytics` library):**
+    ```python
+    # pip install ultralytics
+    from ultralytics import YOLO
+    import cv2
+
+    # Load a pre-trained YOLO model (e.g., YOLOv8n)
+    # model = YOLO('yolov8n.pt') # n=nano, s=small, m=medium, l=large, x=xlarge
+
+    # Perform detection on an image
+    # results = model('path/to/image.jpg') # Can also be video path, webcam index (0)
+
+    # Process results
+    # for result in results:
+    #     boxes = result.boxes # Bounding box objects
+    #     img = result.orig_img # Original image
+
+    #     for box in boxes:
+    #         xyxy = box.xyxy[0].cpu().numpy().astype(int) # Bbox coordinates (x1, y1, x2, y2)
+    #         conf = box.conf[0].cpu().numpy()           # Confidence score
+    #         cls_id = int(box.cls[0].cpu().numpy())     # Class ID
+    #         class_name = model.names[cls_id]         # Class name
+
+    #         # Draw rectangle and label on image (using OpenCV)
+    #         # cv2.rectangle(img, (xyxy[0], xyxy[1]), (xyxy[2], xyxy[3]), (0, 255, 0), 2)
+    #         # cv2.putText(img, f"{class_name} {conf:.2f}", (xyxy[0], xyxy[1]-10),
+    #         #             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+
+    # Display or save the image with detections
+    # cv2.imshow("YOLO Detection", img)
+    # cv2.waitKey(0)
+    # cv2.destroyAllWindows()
+    ```
+* **Eval/Best Practices:** Use standard object detection metrics (mAP). Choose model size (n, s, m, l, x) based on speed/accuracy trade-off required. Fine-tune on custom datasets.
+* **Libraries:** `Ultralytics` (official YOLOv5 & v8), `Darknet` (original framework), `OpenCV` (DNN module), `PyTorch Hub`, `TensorFlow Hub`.
+* **GPU Opt:** Essential for real-time performance and training. Implementations are highly optimized for NVIDIA GPUs via CUDA/cuDNN.
+
+---
+
+### 6. FaceNet
+
+* **Explanation:** A deep learning system developed by Google specifically for face recognition tasks:
+    * **Face Verification:** ("Is this the same person?") Comparing two face images.
+    * **Face Recognition:** ("Who is this person?") Identifying a face against a database of known faces.
+    * **Face Clustering:** Grouping similar faces together.
+* **Core Idea:** Learns a mapping (embedding) from face images to a compact 128-dimensional Euclidean space where the squared L2 distance between embeddings directly corresponds to face similarity. Faces of the same person have small distances, while faces of different people have large distances.
+* **Training:** Uses a **Triplet Loss** function. The network is trained with triplets of images:
+    * **Anchor (A):** A reference face image.
+    * **Positive (P):** A different image of the same person as the anchor.
+    * **Negative (N):** An image of a different person.
+    * The loss function aims to ensure $||f(A) - f(P)||^2_2 + \alpha < ||f(A) - f(N)||^2_2$, where $f(\cdot)$ is the embedding function and $\alpha$ is a margin. It pushes embeddings of the same person closer together than embeddings of different people by at least the margin $\alpha$.
+* **Tricks & Treats:** Achieves high accuracy on benchmark face recognition datasets. The learned embeddings are compact and efficient for comparison.
+* **Caveats/Questions:** Requires large amounts of training data with multiple images per person. Triplet selection (mining) during training is crucial for efficiency and performance (e.g., using semi-hard negatives). Requires accurate face detection and alignment as a preprocessing step.
+* **Python:** Pre-trained models and implementations available. Can use libraries like `keras-facenet` or implement using `TensorFlow`/`Keras` or `PyTorch` with custom triplet loss training loops. Face detection often done with MTCNN or Haar Cascades (`OpenCV`).
+* **Eval/Best Practices:** Evaluate using standard face verification metrics (e.g., accuracy at a specific distance threshold, ROC curve, Equal Error Rate - EER) or identification accuracy. Use appropriate face detection and alignment. Triplet mining strategy impacts results.
+* **Libraries:** `keras-facenet`, `face_recognition`, implementations within `TensorFlow`/`PyTorch` using libraries like `tensorflow_addons` (for triplet loss) or custom implementations.
+* **GPU Opt:** Essential for training the deep CNN used by FaceNet. Inference (generating embeddings) also benefits from GPUs.
+* **Math/Subtleties:** Triplet loss function, Euclidean distance in embedding space, online/offline triplet mining strategies.
+* **SOTA Improvement:** FaceNet established the effectiveness of deep metric learning using triplet loss for face recognition. Newer architectures and loss functions (e.g., ArcFace, CosFace, SphereFace using angular margins) have further improved SOTA performance.
+
