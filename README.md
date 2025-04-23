@@ -848,3 +848,220 @@ Writing a doc for ML tips and techniques as a glance
 * **Math/Subtleties:** Messages represent summaries of distributions. Based on sum-product operations for marginals, max-product for MAP. Connection to Bethe free energy in physics for Loopy BP.
 * **SOTA Improvement:** Core inference algorithm. Generalized Belief Propagation and variants aim to improve accuracy on loopy graphs. Its principles influence message-passing algorithms in other areas (e.g., Graph Neural Networks).
 
+## Dimensionality Reduction
+
+*Goal: Reduce the number of features (dimensions) of a dataset while preserving essential information. Used to mitigate the "curse of dimensionality", speed up learning, simplify models, enable visualization, and reduce noise.*
+
+---
+
+### 1. Principal Component Analysis (PCA)
+
+* **Explanation:** A linear technique that transforms data into a new coordinate system such that the greatest variance lies on the first coordinate (first principal component), the second greatest variance on the second coordinate, and so on. Finds orthogonal axes (principal components) that capture maximum variance.
+* **Algorithm:** Typically involves calculating the covariance matrix of the data and performing eigenvalue decomposition, or using Singular Value Decomposition (SVD) on the centered data matrix. Components corresponding to the largest eigenvalues/singular values are retained.
+* **Tricks & Treats:** Simple, fast, and effective for data compression and noise reduction if variance correlates with importance. Components are uncorrelated.
+* **Caveats/Questions:** Assumes linearity. Sensitive to feature scaling (standardize data first!). Components might not be easily interpretable. Maximizing variance doesn't always equate to preserving useful information (e.g., for classification).
+* **Python (using `scikit-learn`):**
+    ```python
+    from sklearn.decomposition import PCA
+    from sklearn.preprocessing import StandardScaler
+    import numpy as np
+
+    # Assume X_data is loaded (e.g., shape [n_samples, n_features])
+    # X_data = np.random.rand(100, 50) # Example
+
+    # 1. Scale data
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X_data)
+
+    # 2. Apply PCA (e.g., reduce to 10 dimensions)
+    n_components = 10
+    pca = PCA(n_components=n_components)
+    X_pca = pca.fit_transform(X_scaled)
+
+    print(f"Original shape: {X_scaled.shape}")
+    print(f"Reduced shape: {X_pca.shape}")
+    print(f"Explained variance ratio (first {n_components} components): {pca.explained_variance_ratio_.sum():.3f}")
+    ```
+* **Eval/Best Practices:** Choose the number of components based on cumulative explained variance (e.g., retaining 95-99% variance). Check if assumptions (linearity) hold. Visualize data projected onto first 2-3 components.
+* **Libraries:** `scikit-learn`.
+* **GPU Opt:** Yes, `cuml.decomposition.PCA`, `cuml.decomposition.IncrementalPCA`, and `cuml.decomposition.TruncatedSVD` offer significant speedups.
+* **Math/Subtleties:** Principal components are eigenvectors of the covariance matrix. Explained variance corresponds to eigenvalues. Uses SVD internally in many implementations for numerical stability.
+* **SOTA Improvement:** Foundational linear technique. Kernel PCA extends it to non-linear relationships. Still widely used as a baseline or preprocessing step.
+
+---
+
+### 2. Singular Value Decomposition (SVD)
+
+* **Explanation:** A fundamental matrix factorization technique decomposing any matrix $A$ into three matrices: $A = U \Sigma V^T$. $U$ and $V$ are orthogonal matrices (containing left and right singular vectors), and $\Sigma$ is a diagonal matrix containing singular values (non-negative, ordered by magnitude).
+* **Relation to PCA:** PCA can be performed by applying SVD to the mean-centered data matrix. The principal components are related to the right singular vectors ($V$), and the explained variance to the singular values ($\sigma_i^2$).
+* **Tricks & Treats:** More general than eigenvalue decomposition (applies to any matrix, not just square symmetric). Numerically stable. Used in PCA, matrix approximation (low-rank approximation by keeping top *k* singular values), pseudo-inverse calculation, latent semantic analysis (LSA/LSI) in NLP, and recommender systems (as a form of matrix factorization).
+* **Caveats/Questions:** Interpretation might be less direct than PCA components unless used specifically for PCA. Computation can be expensive for very large matrices, though truncated SVD (computing only top *k* components) is often used.
+* **Python (Truncated SVD for DR using `scikit-learn`):**
+    ```python
+    from sklearn.decomposition import TruncatedSVD
+    # Assume X_scaled is loaded (no centering needed for TruncatedSVD typically)
+
+    n_components = 10
+    svd = TruncatedSVD(n_components=n_components, random_state=42)
+    X_svd = svd.fit_transform(X_scaled) # Or potentially on raw count matrix X
+
+    print(f"Reduced shape via SVD: {X_svd.shape}")
+    print(f"Explained variance ratio (SVD): {svd.explained_variance_ratio_.sum():.3f}")
+    ```
+* **Eval/Best Practices:** Similar to PCA when used for DR (explained variance). Evaluate based on downstream task performance (e.g., recommendation quality, LSA topic quality).
+* **Libraries:** `numpy.linalg`, `scipy.linalg`, `scikit-learn` (TruncatedSVD).
+* **GPU Opt:** Yes, `cuml.decomposition.TruncatedSVD` provides acceleration. GPU linear algebra libraries (cuSOLVER) accelerate core SVD computations.
+* **Math/Subtleties:** Singular values represent the "magnitude" of variance along principal axes. Left/right singular vectors form orthonormal bases for the column/row spaces. Low-rank approximation minimizes Frobenius norm difference.
+* **SOTA Improvement:** Core linear algebra technique. Algorithms for large-scale and distributed SVD are important. Randomized SVD offers faster approximation.
+
+---
+
+### 3. t-Distributed Stochastic Neighbor Embedding (t-SNE)
+
+* **Explanation:** A non-linear dimensionality reduction technique primarily used for *visualizing* high-dimensional data in 2D or 3D. It models similarity between high-dimensional points as conditional probabilities and minimizes the Kullback-Leibler (KL) divergence between these probabilities and the probabilities representing similarities in the low-dimensional map (using a t-distribution in the low-D space). Focuses on preserving local structure (keeping similar points close in the map).
+* **Tricks & Treats:** Excellent at revealing local structure and clusters in data. Widely used for visualizing embeddings from deep learning models.
+* **Caveats/Questions:** Computationally intensive ($O(N^2)$ naively, $O(N \log N)$ with approximations like Barnes-Hut). Stochastic (different runs give different visualizations). Cluster sizes and inter-cluster distances in the t-SNE plot are not always meaningful - focus on which points cluster together. Highly sensitive to hyperparameters, especially `perplexity`. Primarily for visualization, not general-purpose DR.
+* **Python (using `scikit-learn`):**
+    ```python
+    from sklearn.manifold import TSNE
+    import matplotlib.pyplot as plt
+    # Assume X_data is loaded (e.g., features from images, word embeddings)
+
+    # Scale data if features have very different ranges
+    # X_scaled = StandardScaler().fit_transform(X_data)
+
+    tsne = TSNE(n_components=2, perplexity=30.0, learning_rate='auto',
+                init='pca', n_iter=1000, random_state=42)
+    X_tsne = tsne.fit_transform(X_scaled) # Use scaled data
+
+    # Visualize (assuming y_labels exist for coloring)
+    plt.figure(figsize=(10, 8))
+    plt.scatter(X_tsne[:, 0], X_tsne[:, 1], c=y_labels, cmap='viridis')
+    plt.title('t-SNE Visualization')
+    plt.xlabel('t-SNE Component 1')
+    plt.ylabel('t-SNE Component 2')
+    plt.show()
+    ```
+* **Eval/Best Practices:** Tune `perplexity` (typically 5-50, relates to number of neighbors considered, try different values). Tune `learning_rate` (often 'auto' works well). Use PCA initialization (`init='pca'`) for stability. Run for enough iterations (`n_iter`). Mainly evaluated visually.
+* **Libraries:** `scikit-learn`, `openTSNE` (faster, more features).
+* **GPU Opt:** Yes, `cuml.manifold.TSNE` provides significant acceleration using Barnes-Hut approximations on the GPU.
+* **Math/Subtleties:** Uses Gaussian kernel in high-D, Student's t-distribution (with 1 degree of freedom) in low-D (helps separate dissimilar points). Optimization minimizes KL divergence using gradient descent.
+* **SOTA Improvement:** Very popular for visualization. UMAP (Uniform Manifold Approximation and Projection) is a newer alternative often considered faster and better at preserving global structure while retaining good local structure.
+
+---
+
+### 4. Autoencoders (AE)
+
+* **Explanation:** A type of unsupervised artificial neural network used for learning efficient data codings (representations). Consists of an *encoder* network that maps the input $X$ to a lower-dimensional *latent representation* (code) $Z$, and a *decoder* network that reconstructs the input $\hat{X}$ from $Z$. Trained to minimize the reconstruction error (e.g., $||X - \hat{X}||^2$). The latent representation $Z$ serves as the dimensionally reduced output.
+* **Tricks & Treats:** Can learn complex, non-linear dimensionality reductions. The bottleneck layer size determines the reduced dimension. Variants exist: Denoising AE (robust to noise), Sparse AE (encourages sparse codes), Variational AE (VAE - generative model learning a distribution in latent space).
+* **Caveats/Questions:** Requires training a neural network (can be computationally expensive, needs hyperparameter tuning like architecture, optimizer, learning rate). May overfit if not regularized. Latent space might not be easily interpretable.
+* **Python (Simple AE using `Keras`):**
+    ```python
+    import numpy as np
+    from tensorflow import keras
+    from tensorflow.keras import layers
+    from sklearn.model_selection import train_test_split
+    # Assume X_data is loaded and scaled (e.g., shape [n_samples, n_features])
+
+    n_features = X_data.shape[1]
+    encoding_dim = 32 # Desired reduced dimension
+
+    # Define Encoder & Decoder
+    input_layer = keras.Input(shape=(n_features,))
+    encoded = layers.Dense(128, activation='relu')(input_layer)
+    encoded = layers.Dense(64, activation='relu')(encoded)
+    encoded = layers.Dense(encoding_dim, activation='relu')(encoded) # Bottleneck
+
+    decoded = layers.Dense(64, activation='relu')(encoded)
+    decoded = layers.Dense(128, activation='relu')(decoded)
+    decoded = layers.Dense(n_features, activation='sigmoid')(decoded) # Output matches input shape
+
+    # Define Autoencoder model (ties input to reconstruction)
+    autoencoder = keras.Model(input_layer, decoded)
+
+    # Define Encoder model separately (to get latent representation later)
+    encoder = keras.Model(input_layer, encoded)
+
+    # Compile and Train
+    autoencoder.compile(optimizer='adam', loss='mse')
+    X_train, X_val = train_test_split(X_data, test_size=0.2, random_state=42)
+    autoencoder.fit(X_train, X_train, # Input == Target
+                    epochs=50, batch_size=256,
+                    validation_data=(X_val, X_val), verbose=0)
+
+    # Get reduced data
+    X_reduced_ae = encoder.predict(X_data)
+    print(f"Reduced shape via Autoencoder: {X_reduced_ae.shape}")
+    ```
+* **Eval/Best Practices:** Monitor reconstruction loss (MSE) on validation set. Evaluate usefulness of latent representation on downstream tasks. Visualize reconstructions. Choose appropriate architecture and bottleneck size.
+* **Libraries:** `TensorFlow`/`Keras`, `PyTorch`.
+* **GPU Opt:** **Crucial.** Training neural networks is significantly accelerated by GPUs.
+* **Math/Subtleties:** Backpropagation minimizes reconstruction loss. Activation functions (ReLU, sigmoid), loss functions (MSE, binary cross-entropy), optimizers (Adam) are key components. VAEs involve KL divergence term in loss for regularization.
+* **SOTA Improvement:** State-of-the-art for many non-linear dimensionality reduction tasks, feature learning, and generative modeling (VAEs). Continual architecture improvements.
+
+---
+
+### 5. Matrix Factorization (MF)
+
+* **Explanation:** A broad class of techniques that decompose a matrix $A$ into the product of two or more lower-rank matrices, e.g., $A_{m \times n} \approx W_{m \times k} H_{k \times n}$, where $k$ is typically much smaller than $m$ and $n$. The lower-rank matrices $W$ and $H$ can be seen as containing latent features or reduced dimensions.
+* **Applications:**
+    * **Dimensionality Reduction:** PCA and SVD are specific types of MF. Non-negative Matrix Factorization (NMF) finds non-negative factors, useful for tasks like topic modeling or image decomposition where components should be additive.
+    * **Recommender Systems:** Factorizing a (sparse) user-item interaction matrix (e.g., ratings) into user-factor ($W$) and item-factor ($H$) matrices. The dot product of a user's factors and an item's factors predicts the user's preference for the item.
+* **Tricks & Treats:** Can uncover latent structure in data. Effective for collaborative filtering in recommenders. NMF yields interpretable components (if non-negativity makes sense).
+* **Caveats/Questions:** Often involves iterative optimization (e.g., Alternating Least Squares - ALS, Stochastic Gradient Descent - SGD) which can have local optima. Choice of rank *k* is important. Sparsity needs careful handling (especially in recommenders).
+* **Python (NMF using `scikit-learn`):**
+    ```python
+    from sklearn.decomposition import NMF
+    # Assume X_data is non-negative (e.g., document-term counts, image pixels)
+
+    n_components = 10 # Number of latent factors/topics
+    nmf = NMF(n_components=n_components, init='random', random_state=42, max_iter=300)
+    W = nmf.fit_transform(X_data) # User/Document factors (reduced dim)
+    H = nmf.components_ # Item/Word factors
+
+    print(f"NMF reduced shape (W): {W.shape}")
+    # Reconstruction error: nmf.reconstruction_err_
+    ```
+* **Eval/Best Practices:** For DR: Reconstruction error, downstream task performance. For recommenders: RMSE/MAE on ratings, Precision/Recall@k on ranked lists. For NMF topic modeling: Topic coherence. Tune rank *k* and regularization parameters.
+* **Libraries:** `scikit-learn` (NMF), `Surprise` (SVD, SVD++, NMF for recommenders), `TensorFlow` (WALS), `implicit`.
+* **GPU Opt:** Possible depending on the algorithm and library. WALS can be parallelized. SGD-based methods benefit if implemented in deep learning frameworks. Core matrix operations leverage GPU BLAS libraries.
+* **Math/Subtleties:** Optimization objective varies (e.g., minimize Frobenius norm, KL divergence for NMF). Regularization is often added to prevent overfitting. ALS alternates optimizing W holding H fixed, and vice versa.
+* **SOTA Improvement:** Core technique in recommenders. Advances include incorporating side information (content features, temporal dynamics), handling implicit feedback, and deep learning hybrids (e.g., Neural Collaborative Filtering).
+
+---
+
+### 6. Spectral Clustering
+
+* **Explanation:** A clustering technique that uses the properties (eigenvalues/eigenvectors) of a similarity matrix derived from the data to perform dimensionality reduction before clustering in lower dimensions. It treats data points as nodes in a graph and uses the graph's spectrum (eigenvalues of the Laplacian matrix) to find clusters.
+* **Algorithm:**
+    1. Construct a similarity graph (e.g., using k-NN or Gaussian kernel) representing relationships between points.
+    2. Compute the Graph Laplacian matrix (e.g., $L = D - W$ or normalized variants, where $W$ is adjacency/similarity matrix, $D$ is degree matrix).
+    3. Compute the first *k* eigenvectors of the Laplacian (corresponding to the smallest eigenvalues). These eigenvectors form a new, lower-dimensional representation.
+    4. Cluster the points represented by these eigenvectors (rows of the eigenvector matrix) using a standard algorithm like K-Means.
+* **Tricks & Treats:** Can capture non-convex cluster shapes (unlike K-Means on original space). Effective when clusters are connected but not necessarily compact/spherical.
+* **Caveats/Questions:** Requires specifying the number of clusters *k*. Performance depends on the construction of the similarity graph (choice of similarity measure, parameters like k in k-NN or sigma in Gaussian kernel). Computing eigenvectors can be computationally expensive for large datasets ($O(N^3)$ naively).
+* **Python (using `scikit-learn`):**
+    ```python
+    from sklearn.cluster import SpectralClustering
+    from sklearn.datasets import make_moons
+    import matplotlib.pyplot as plt
+
+    # Generate non-convex data
+    X_moons, y_moons = make_moons(n_samples=200, noise=0.05, random_state=42)
+
+    # Apply Spectral Clustering
+    spectral = SpectralClustering(n_clusters=2, affinity='nearest_neighbors',
+                                  n_neighbors=10, random_state=42)
+    labels = spectral.fit_predict(X_moons)
+
+    # Visualize
+    plt.figure(figsize=(8, 6))
+    plt.scatter(X_moons[:, 0], X_moons[:, 1], c=labels, cmap='viridis')
+    plt.title('Spectral Clustering Result')
+    plt.show()
+    ```
+* **Eval/Best Practices:** Evaluate using standard clustering metrics (Silhouette, Davies-Bouldin, ARI if ground truth exists). Tune `n_clusters` and graph construction parameters (`affinity`, `gamma`, `n_neighbors`).
+* **Libraries:** `scikit-learn`.
+* **GPU Opt:** The final K-Means step can be accelerated using `cuml.cluster.KMeans`. Eigen-decomposition can leverage GPU linear algebra libraries (cuSOLVER), though direct integration in scikit-learn is limited.
+* **Math/Subtleties:** Graph Laplacian, eigenvectors as embedding, relationship to graph partitioning (Normalized Cut). Different Laplacian variants exist (unnormalized, symmetric normalized, random walk normalized).
+* **SOTA Improvement:** Powerful graph-based clustering. Research focuses on scalability (e.g., using Nyström method for approximate eigenvectors) and robust graph construction.
