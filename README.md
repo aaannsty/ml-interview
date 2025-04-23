@@ -394,3 +394,240 @@ Writing a doc for ML tips and techniques as a glance
     * **Adjusted $R^2$:** $R^2$ adjusted for the number of predictors. Penalizes adding useless features.
 * **Best Practices:** Use multiple metrics. Consider data imbalance (use Precision, Recall, F1, AUC for classification). Use cross-validation for robust estimates. Split data into Train/Validation/Test sets.
 
+## Unsupervised Learning
+
+*Goal: Discover patterns, structures, or representations in unlabeled data.*
+
+---
+
+### 1. Clustering Algorithms (General)
+
+* **Explanation:** The task of grouping a set of objects such that objects in the same group (cluster) are more similar to each other than to those in other groups. Similarity is often based on distance or density in the feature space.
+* **Types:** Include centroid-based (K-Means), density-based (DBSCAN), distribution-based (GMM), and hierarchical clustering.
+* **Tricks & Treats:** Feature scaling is often crucial. The definition of "similarity" (distance metric) impacts results. Visualizing high-dimensional clusters is challenging (often requires dimensionality reduction).
+* **Caveats/Questions:** How to determine the optimal number of clusters? How to evaluate clustering quality without labels? How to handle different cluster shapes and densities?
+* **Eval/Best Practices:** See "Evaluation Metrics for Clustering" below. Domain knowledge often helps interpret clusters.
+* **Libraries:** `scikit-learn`, `scipy.cluster`.
+* **GPU Opt:** Possible for specific algorithms (see below).
+* **SOTA Improvement:** Active research area, especially for large-scale, high-dimensional, or streaming data. Algorithms handling complex shapes, varying densities, and providing interpretability are key focus areas. Methods combining clustering with deep learning (deep clustering) are also advancing.
+
+---
+
+### 2. K-Means Clustering
+
+* **Explanation:** A centroid-based partitioning algorithm. Aims to partition *n* observations into *k* clusters where each observation belongs to the cluster with the nearest mean (cluster centroid).
+* **Algorithm:**
+    1. Initialize *k* centroids (randomly or using methods like k-means++).
+    2. **Assignment Step (E-step):** Assign each data point to the nearest centroid.
+    3. **Update Step (M-step):** Recalculate the centroid position as the mean of all points assigned to that cluster.
+    4. Repeat steps 2-3 until centroids stabilize or max iterations are reached.
+* **Tricks & Treats:** Simple and fast for large datasets. k-means++ initialization helps avoid poor local optima.
+* **Caveats/Questions:** Must specify *k* beforehand. Sensitive to initial centroid placement (run multiple times with different seeds). Assumes clusters are spherical, equally sized, and have similar density. Can be sensitive to outliers.
+* **Python (Simple Example):**
+    ```python
+    import numpy as np
+    from sklearn.cluster import KMeans
+    from sklearn.preprocessing import StandardScaler
+    # Assume X_data (unlabeled features) is loaded
+    # X_data = np.random.rand(100, 2) # Example
+
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X_data)
+
+    kmeans = KMeans(n_clusters=3, random_state=42, n_init=10) # Specify k=3, run 10 times
+    kmeans.fit(X_scaled)
+
+    labels = kmeans.labels_
+    centroids = kmeans.cluster_centers_
+    print("Cluster labels assigned:", labels[:10])
+    # print("Centroids:", centroids)
+    ```
+* **Eval/Best Practices:** Use the Elbow method (plotting inertia/sum of squared distances vs. *k*) or Silhouette score to help choose *k*. Run multiple initializations (`n_init`). Feature scaling is important.
+* **Libraries:** `scikit-learn`, `scipy`.
+* **GPU Opt:** Yes, `cuml.cluster.KMeans` provides significant speedups.
+* **Math/Subtleties:** Minimizes within-cluster variance (Inertia or Sum of Squared Errors - SSE). Can be seen as an Expectation-Maximization algorithm with hard assignments.
+* **SOTA Improvement:** Foundational. Improvements include better initialization (k-means++), mini-batch k-means for very large data, and kernel k-means for non-spherical shapes (though less common now).
+
+---
+
+### 3. DBSCAN (Density-Based Spatial Clustering of Applications with Noise)
+
+* **Explanation:** A density-based clustering algorithm. Groups together points that are closely packed, marking outliers (noise points) that lie alone in low-density regions. Can find arbitrarily shaped clusters.
+* **Algorithm:** Defines clusters based on core points, border points, and noise points.
+    * **Core Point:** A point with at least `min_samples` neighbors within distance `eps`.
+    * **Border Point:** Reachable from a core point but has fewer than `min_samples` neighbors.
+    * **Noise Point:** Neither a core nor a border point.
+* **Tricks & Treats:** Does not require specifying the number of clusters beforehand. Robust to outliers. Can find non-spherical clusters.
+* **Caveats/Questions:** Sensitive to parameters `eps` (neighborhood distance) and `min_samples`. Struggles with clusters of varying densities. Distance metric choice is important. Finding optimal `eps` can be tricky (k-distance plot analysis is common).
+* **Python:**
+    ```python
+    from sklearn.cluster import DBSCAN
+    # Assume X_scaled is loaded
+
+    # Parameters need tuning, e.g., via k-distance plot analysis or grid search
+    dbscan = DBSCAN(eps=0.5, min_samples=5)
+    dbscan.fit(X_scaled)
+
+    labels = dbscan.labels_ # Cluster labels, -1 indicates noise points
+    print("DBSCAN labels (noise=-1):", labels[:10])
+    # Number of clusters = len(set(labels)) - (1 if -1 in labels else 0)
+    ```
+* **Eval/Best Practices:** Tune `eps` and `min_samples`. Silhouette score can be used (ignoring noise points), but density-based metrics might be more appropriate if available.
+* **Libraries:** `scikit-learn`.
+* **GPU Opt:** Yes, `cuml.cluster.DBSCAN` offers significant acceleration.
+* **Math/Subtleties:** Concepts of density reachability and density connectivity are central.
+* **SOTA Improvement:** Core algorithm is widely used. Variants like OPTICS (orders points to extract density-based structure) and HDBSCAN* (hierarchical DBSCAN) address parameter sensitivity and varying densities. Specialized versions (e.g., T-DBSCAN for spatio-temporal data) exist.
+
+---
+
+### 4. Gaussian Mixture Models (GMM) & Expectation Maximization (EM)
+
+* **Explanation:** A probabilistic model assuming data is generated from a mixture of several Gaussian distributions, each representing a cluster. Provides "soft" clustering (probabilities of belonging to each cluster).
+* **EM Algorithm:** Used to fit GMMs. Iterative process:
+    1. **Initialize:** Guess initial parameters (means $\mu_k$, covariances $\Sigma_k$, mixing coefficients $\pi_k$) for *k* Gaussians.
+    2. **Expectation (E-step):** Calculate the probability (responsibility) that each data point belongs to each Gaussian component, given current parameters.
+    3. **Maximization (M-step):** Update the parameters ($\mu_k, \Sigma_k, \pi_k$) to maximize the likelihood of the data given the responsibilities calculated in the E-step.
+    4. Repeat steps 2-3 until convergence (log-likelihood stabilizes).
+* **Tricks & Treats:** More flexible than K-Means (handles ellipsoidal clusters due to covariance). Provides cluster probabilities.
+* **Caveats/Questions:** Must specify the number of components (*k*). Assumes data follows Gaussian distributions. Can be computationally intensive. Sensitive to initialization. Covariance type (spherical, tied, diag, full) is an important choice.
+* **Python:**
+    ```python
+    from sklearn.mixture import GaussianMixture
+    # Assume X_scaled is loaded
+
+    gmm = GaussianMixture(n_components=3, random_state=42, covariance_type='full') # Specify k=3
+    gmm.fit(X_scaled)
+
+    labels = gmm.predict(X_scaled) # Hard assignment based on max probability
+    probabilities = gmm.predict_proba(X_scaled) # Soft assignments
+    print("GMM labels:", labels[:10])
+    # print("GMM probabilities (first point):", probabilities[0])
+    ```
+* **Eval/Best Practices:** Use metrics like Bayesian Information Criterion (BIC) or Akaike Information Criterion (AIC) to help select *k* and `covariance_type`. Check convergence.
+* **Libraries:** `scikit-learn`.
+* **GPU Opt:** Less direct than K-Means/DBSCAN in scikit-learn. Probabilistic programming libraries (`Pyro`, `NumPyro`, `TensorFlow Probability`) built on GPU backends can accelerate EM or variational inference for GMMs.
+* **Math/Subtleties:** Maximizes data log-likelihood. Latent variables indicate component membership. BIC/AIC balance model fit and complexity.
+* **SOTA Improvement:** Standard technique for density estimation and soft clustering. Variational inference offers an alternative to EM for large datasets or more complex Bayesian GMMs.
+
+---
+
+### 5. Anomaly Detection (Outlier Detection)
+
+* **Explanation:** Identifying data points, events, or observations that deviate significantly from the majority of the data ("normal" behavior). Can be unsupervised (no pre-labeled anomalies).
+* **Methods:**
+    * **Statistical:** Based on distribution (e.g., points outside 3 standard deviations for Gaussian data, EWMA for time series).
+    * **Distance-Based:** Outliers are far from neighbors (e.g., KNN-based outlier factor).
+    * **Clustering-Based:** Points not assigned to any cluster (like DBSCAN noise) or belonging to very small clusters.
+    * **Dedicated Algorithms:** Isolation Forest (isolates anomalies using random trees), One-Class SVM (learns a boundary around normal data).
+    * **Deep Learning:** Autoencoders (poor reconstruction error for anomalies), GANs, specialized networks.
+* **Tricks & Treats:** Choice of method depends heavily on data type (tabular, time series, image) and expected anomaly type. Defining "normal" is key.
+* **Caveats/Questions:** Need to define what constitutes an anomaly. Performance highly sensitive to thresholds or model parameters. Handling high-dimensional data can be challenging ("curse of dimensionality"). Often deals with highly imbalanced data (few anomalies).
+* **Python (Isolation Forest Example):**
+    ```python
+    from sklearn.ensemble import IsolationForest
+    # Assume X_scaled is loaded
+
+    iso_forest = IsolationForest(n_estimators=100, contamination='auto', random_state=42)
+    # 'contamination' is expected proportion of outliers, can be float e.g. 0.01
+    predictions = iso_forest.fit_predict(X_scaled) # Returns 1 for inliers, -1 for outliers
+
+    print("Isolation Forest predictions (outlier=-1):", predictions[:10])
+    # anomaly_scores = iso_forest.decision_function(X_scaled) # Lower score = more anomalous
+    ```
+* **Eval/Best Practices:** If some labeled anomalies exist (semi-supervised), use Precision, Recall, F1 on the anomaly class. Without labels, evaluation is often qualitative or relies on assumptions about anomaly scores. Domain expertise is crucial.
+* **Libraries:** `scikit-learn` (IsolationForest, LocalOutlierFactor, OneClassSVM), `PyOD`, specialized libraries (`Anomalib`, `DeepOD`, `Orion`).
+* **GPU Opt:** Some deep learning methods leverage GPUs heavily. Some components of other methods (like distance calculations) might be accelerated.
+* **SOTA Improvement:** Deep learning approaches are SOTA for complex data like images/video. Research focuses on robustness, handling concept drift (changing normality), explainability, and few-shot/zero-shot anomaly detection.
+
+---
+
+### 6. Markov Methods (Briefly in Unsupervised Context)
+
+* **Explanation:** Markov models (especially Hidden Markov Models - HMMs) can be used in an unsupervised way to discover underlying "hidden" states or recurring patterns in sequential data without explicit labels for those states.
+* **Example Use Case:** Identifying different phases of machine operation based on sensor data, segmenting customer behavior sequences, or finding patterns in biological sequences.
+* **Tricks & Treats:** Automatically detects characteristic, recurring patterns (states) from time series or sequences.
+* **Caveats/Questions:** Requires specifying the number of hidden states. Assumes the Markov property holds (current state depends only on the previous state). Training (e.g., using Baum-Welch, an EM algorithm variant) can be complex.
+* **Eval/Best Practices:** Often qualitative evaluation or based on downstream task performance. BIC/AIC can help select the number of states.
+* **Libraries:** `hmmlearn`, `pomegranate`.
+* **SOTA Improvement:** Foundational for sequence analysis. While powerful, often complemented or replaced by RNNs/LSTMs/Transformers for complex sequence modeling tasks (see Sequential Models / Deep Learning).
+
+---
+
+### 7. Self-Organizing Maps (SOM)
+
+* **Explanation:** A type of Artificial Neural Network used for unsupervised learning, primarily for dimensionality reduction and clustering. Maps high-dimensional input data onto a lower-dimensional (typically 2D) grid of neurons, preserving topological relationships.
+* **Algorithm:** Uses competitive learning. Input data points are presented, and the neuron with the closest weight vector (Best Matching Unit - BMU) is found. The BMU and its neighbors on the grid update their weights to become closer to the input point.
+* **Tricks & Treats:** Excellent for visualization and exploratory data analysis. Creates a topology-preserving map.
+* **Caveats/Questions:** Requires specifying grid size and topology. Training can be iterative and sensitive to learning rate and neighborhood function decay. Doesn't produce explicit cluster boundaries like K-Means.
+* **Python (Using MiniSom):**
+    ```python
+    # pip install MiniSom
+    from minisom import MiniSom
+    # Assume X_scaled is loaded
+
+    map_width = 10
+    map_height = 10
+    som = MiniSom(map_width, map_height, X_scaled.shape[1], sigma=1.0, learning_rate=0.5, random_seed=42)
+    som.train_random(X_scaled, 100) # Train for 100 iterations
+
+    # To get cluster assignments, can find BMU for each point
+    winner_coords = np.array([som.winner(x) for x in X_scaled]).T
+    # Further analysis/visualization needed (e.g., U-Matrix, mapping points to grid)
+    ```
+* **Eval/Best Practices:** Quantization error (average distance between data points and their BMU weights) and topographic error (proportion of points where the first and second BMUs are not adjacent) can measure map quality. Visualization (U-Matrix) is key.
+* **Libraries:** `MiniSom`, `SuSi` (supports unsupervised/supervised SOMs).
+* **GPU Opt:** Less common for standard SOMs, though some research explores parallelization.
+* **Math/Subtleties:** Neighborhood function (often Gaussian) shrinks over time. Learning rate decays. Competitive learning updates weights: $\Delta w_{ij} = \eta(t) h_{ij}(t) (x - w_{ij})$.
+* **SOTA Improvement:** Classic technique for visualization and topological mapping. Less common as a primary clustering method compared to K-Means/DBSCAN/GMM now, but valuable for specific exploratory tasks.
+
+---
+
+### 8. Deep Belief Nets (DBN) - Historical Context
+
+* **Explanation:** Generative graphical models composed of multiple layers of latent variables ("beliefs"). Each layer is typically a Restricted Boltzmann Machine (RBM). Historically significant for unsupervised pre-training of deep neural networks.
+* **Algorithm:** Trained greedily, one layer (RBM) at a time using Contrastive Divergence. The output activations of one trained RBM serve as input to train the next.
+* **Tricks & Treats:** Can learn hierarchical representations of features. Provided a way to initialize deep networks before better methods (ReLU, better optimizers, batch norm) became widespread.
+* **Caveats/Questions:** Training is complex and slow. Largely superseded by other deep learning techniques (VAEs, GANs, Transformers, better initialization strategies) for most tasks.
+* **Python:** (Less common now, libraries like `scikit-learn` removed it. Requires older `tensorflow` versions or specialized libraries).
+* **Eval/Best Practices:** Often evaluated by the performance of a supervised model fine-tuned after DBN pre-training, or by reconstruction error.
+* **Libraries:** Historically in `scikit-learn`, older `TensorFlow`, specialized deep learning libraries.
+* **GPU Opt:** RBM training (Contrastive Divergence) benefits from GPU acceleration.
+* **Math/Subtleties:** Based on RBMs (energy-based models). Contrastive Divergence approximates the gradient of the log-likelihood.
+* **SOTA Improvement:** Historically important for enabling deeper networks. Current usage is niche; concepts influenced modern deep generative models.
+
+---
+
+### 9. Evaluation Metrics for Clustering Problems
+
+* **Explanation:** Assessing the quality of clusters formed by an algorithm. Metrics can be internal (based only on data and cluster assignments) or external (requiring ground truth labels, rarely available in pure unsupervised settings).
+* **Internal Metrics (No Ground Truth Needed):**
+    * **Silhouette Score:** Measures how similar a point is to its own cluster compared to other clusters. Ranges from -1 (bad) to +1 (dense, well-separated clusters). Average score over all points is often used. Higher is better.
+    * **Davies-Bouldin Index (DBI):** Measures the average similarity ratio of each cluster with its most similar cluster. Based on cluster compactness and separation. Lower is better (minimum 0).
+    * **Calinski-Harabasz Index (Variance Ratio Criterion):** Ratio of between-cluster dispersion to within-cluster dispersion. Higher score indicates denser, well-separated clusters. Higher is better.
+* **External Metrics (Require Ground Truth Labels):**
+    * **Adjusted Rand Index (ARI):** Measures similarity between true and predicted clusterings, adjusted for chance. Ranges from -1 to +1 (1 is perfect match, 0 is random).
+    * **Mutual Information (MI) based scores:** (e.g., Normalized Mutual Information - NMI, Adjusted Mutual Information - AMI). Measure agreement between two assignments, ignoring permutations. Adjusted versions account for chance. Higher is better (0 to 1).
+    * **Homogeneity, Completeness, V-measure:** Homogeneity = each cluster contains only members of a single class. Completeness = all members of a given class are assigned to the same cluster. V-measure = harmonic mean of homogeneity and completeness. (0 to 1).
+* **Visual Methods:**
+    * **Elbow Method:** Plots within-cluster sum of squares (Inertia for K-Means) vs. number of clusters (*k*). Look for an "elbow" point where the rate of decrease sharply changes (suggests optimal *k*).
+    * **Silhouette Plots:** Visualizes the Silhouette score for each point within each cluster. Helps assess cluster density and separation, and identify potential misclassifications.
+* **Python:**
+    ```python
+    from sklearn.metrics import silhouette_score, davies_bouldin_score, calinski_harabasz_score
+    # Assume X_scaled and resulting cluster 'labels' are available
+
+    # Use if you DON'T have ground truth
+    sil_score = silhouette_score(X_scaled, labels)
+    db_score = davies_bouldin_score(X_scaled, labels)
+    ch_score = calinski_harabasz_score(X_scaled, labels)
+    print(f"Silhouette Score: {sil_score:.3f}") # Higher better
+    print(f"Davies-Bouldin Score: {db_score:.3f}") # Lower better
+    print(f"Calinski-Harabasz Score: {ch_score:.3f}") # Higher better
+
+    # from sklearn.metrics import adjusted_rand_score
+    # Assume y_true (ground truth labels) are available
+    # ari_score = adjusted_rand_score(y_true, labels)
+    # print(f"Adjusted Rand Index: {ari_score:.3f}") # Higher better
+    ```
+* **Best Practices:** Use multiple internal metrics when ground truth is unavailable. Use visualization methods like Elbow and Silhouette plots. External metrics are definitive if ground truth exists. The "best" number of clusters often depends on the context and downstream application.
+
