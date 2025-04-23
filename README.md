@@ -1241,3 +1241,191 @@ Writing a doc for ML tips and techniques as a glance
 * **GPU Opt:** Essential for training and often beneficial for inference with large deep learning models (BiLSTM, Transformers).
 * **SOTA Improvement:** Transformers have largely surpassed previous methods, offering superior performance due to better context modeling via self-attention.
 
+## Reinforcement Learning (RL)
+
+*Goal: Train an agent to make sequential decisions by interacting with an environment to maximize a cumulative reward signal. The agent learns through trial and error, receiving feedback (rewards or penalties) for its actions.*
+
+---
+
+### 1. Core Concepts & Framework
+
+* **Agent:** The learner or decision-maker.
+* **Environment:** The external system the agent interacts with.
+* **State ($S$):** A representation of the current situation of the environment.
+* **Action ($A$):** A choice made by the agent.
+* **Reward ($R$):** Immediate feedback signal from the environment after an action.
+* **Policy ($\pi$):** The agent's strategy or mapping from states to actions ($\pi(a|s)$ or deterministic $a = \pi(s)$).
+* **Value Function ($V(s)$ or $Q(s, a)$):** Prediction of expected future cumulative reward from a state ($V$) or state-action pair ($Q$).
+* **Markov Decision Process (MDP):** Mathematical framework for modeling RL problems, defined by states, actions, transition probabilities ($P(s'|s, a)$), rewards ($R(s, a, s')$), and a discount factor ($\gamma$).
+* **Goal:** Find a policy $\pi$ that maximizes the expected discounted cumulative reward (Return): $G_t = R_{t+1} + \gamma R_{t+2} + \gamma^2 R_{t+3} + ...$
+
+---
+
+### 2. Explore-Exploit Dilemma
+
+* **Explanation:** A fundamental trade-off in RL.
+    * **Exploitation:** Making the best decision given current knowledge (choosing the action believed to yield the highest reward).
+    * **Exploration:** Trying new actions to gather more information about the environment, potentially discovering better actions than currently known.
+* **Challenge:** Excessive exploitation risks missing better options; excessive exploration accumulates less reward by trying suboptimal actions. Balancing the two is crucial for effective learning.
+* **Techniques:** Addressed by various strategies, particularly evident in Multi-Armed Bandits and incorporated into full RL algorithms (e.g., epsilon-greedy action selection).
+
+---
+
+### 3. Multi-Armed Bandits (MAB)
+
+* **Explanation:** A simplified RL problem focusing purely on the explore-exploit trade-off without different states. An agent must choose repeatedly between multiple "arms" (actions), each with an unknown reward distribution, to maximize cumulative reward.
+* **Strategies:**
+    * **Epsilon-Greedy ($\epsilon$-greedy):**
+        * *Mechanism:* With probability $1-\epsilon$, choose the arm with the highest estimated reward (exploit). With probability $\epsilon$, choose a random arm (explore).
+        * *Pros:* Simple to implement.
+        * *Cons:* Explores randomly (may re-explore bad arms). Performance depends on $\epsilon$ (often decayed over time).
+    * **Upper Confidence Bound (UCB):**
+        * *Mechanism:* Choose the arm 'a' that maximizes $Q(a) + c \sqrt{\frac{\ln t}{N_t(a)}}$, where $Q(a)$ is the estimated value, $t$ is the current time step, $N_t(a)$ is the number of times arm 'a' has been pulled, and $c$ controls exploration. Balances estimated value with uncertainty.
+        * *Pros:* Often explores more effectively than $\epsilon$-greedy. Deterministic (given history).
+        * *Cons:* Requires tuning the exploration parameter $c$. Can be sensitive to reward scale.
+    * **Thompson Sampling (TS):**
+        * *Mechanism:* Bayesian approach. Maintain a probability distribution (posterior) for the reward parameter of each arm (e.g., Beta distribution for Bernoulli rewards). At each step, sample a parameter from each arm's posterior and choose the arm with the highest sampled parameter. Update the chosen arm's posterior based on the observed reward.
+        * *Pros:* Often empirically performs very well. Naturally balances explore/exploit via posterior uncertainty. Robust to delayed feedback.
+        * *Cons:* Requires specifying a prior distribution. Can be computationally more complex depending on the distribution.
+* **Eval/Best Practices:** Compare algorithms based on cumulative reward or cumulative regret (difference between reward obtained and reward from the optimal arm). Tune parameters ($\epsilon$, $c$, prior parameters).
+* **Libraries:** Less standardized libraries than full RL, often implemented manually or using libraries like `simple_rl`.
+
+---
+
+### 4. Q-Learning
+
+* **Explanation:** A model-free, **off-policy** temporal difference (TD) control algorithm. It learns the optimal action-value function, $Q^*(s, a)$, which represents the expected return starting from state $s$, taking action $a$, and thereafter following the optimal policy.
+* **Algorithm:**
+    1. Initialize Q-table $Q(s, a)$ (e.g., to zeros or small random values).
+    2. For each episode:
+        a. Observe initial state $s$.
+        b. While $s$ is not terminal:
+            i. Choose action $a$ from $s$ using policy derived from Q (e.g., $\epsilon$-greedy).
+            ii. Take action $a$, observe reward $r$ and next state $s'$.
+            iii. Update Q-value:
+               $Q(s, a) \leftarrow Q(s, a) + \alpha [r + \gamma \max_{a'} Q(s', a') - Q(s, a)]$
+               ($\alpha$: learning rate, $\gamma$: discount factor)
+            iv. $s \leftarrow s'$.
+* **Tricks & Treats:** Learns the optimal policy directly, even if the agent explores randomly (off-policy). Simple update rule. Guaranteed to converge under certain conditions.
+* **Caveats/Questions:** Can overestimate Q-values (maximization bias). Requires discrete state and action spaces for tabular Q-learning. Convergence can be slow. Performance sensitive to $\alpha, \gamma, \epsilon$.
+* **Python (Conceptual Q-Table):**
+    ```python
+    import numpy as np
+    # Assume discrete states (0 to num_states-1) and actions (0 to num_actions-1)
+    # q_table = np.zeros((num_states, num_actions))
+    # alpha = 0.1
+    # gamma = 0.99
+    # epsilon = 0.1
+
+    # Inside learning loop:
+    # state = get_current_state()
+    # if np.random.rand() < epsilon:
+    #     action = choose_random_action()
+    # else:
+    #     action = np.argmax(q_table[state, :])
+
+    # reward, next_state, done = take_action(action)
+
+    # old_q_value = q_table[state, action]
+    # next_max_q = np.max(q_table[next_state, :])
+    # target = reward + gamma * next_max_q
+    # new_q_value = old_q_value + alpha * (target - old_q_value)
+    # q_table[state, action] = new_q_value
+    # state = next_state
+    ```
+* **Eval/Best Practices:** Monitor cumulative reward per episode. Decay $\epsilon$ over time. Tune $\alpha, \gamma$.
+* **Libraries:** Often implemented manually for tabular cases. Forms the basis for DQN.
+* **Math/Subtleties:** Based on Bellman optimality equation. TD error: $r + \gamma \max_{a'} Q(s', a') - Q(s, a)$.
+* **SOTA Improvement:** Foundational algorithm. Extended by DQN for continuous states. Double Q-learning helps mitigate maximization bias.
+
+---
+
+### 5. SARSA (State–Action–Reward–State–Action)
+
+* **Explanation:** A model-free, **on-policy** temporal difference (TD) control algorithm. It learns the action-value function $Q^\pi(s, a)$ for the *policy $\pi$ being followed* by the agent (including exploration steps).
+* **Algorithm:**
+    1. Initialize Q-table $Q(s, a)$.
+    2. For each episode:
+        a. Observe initial state $s$.
+        b. Choose action $a$ from $s$ using policy $\pi$ derived from Q (e.g., $\epsilon$-greedy).
+        c. While $s$ is not terminal:
+            i. Take action $a$, observe reward $r$ and next state $s'$.
+            ii. **Choose next action $a'$ from $s'$ using policy $\pi$ derived from Q.** (Key difference from Q-learning)
+            iii. Update Q-value:
+                $Q(s, a) \leftarrow Q(s, a) + \alpha [r + \gamma Q(s', a') - Q(s, a)]$
+            iv. $s \leftarrow s'$, $a \leftarrow a'$.
+* **Tricks & Treats:** Learns the value of the actual policy being executed, making it more conservative, especially during exploration or in stochastic environments. Can be safer in applications where avoiding risky actions during learning is important.
+* **Caveats/Questions:** Learns a suboptimal policy if exploration ($\epsilon > 0$) continues indefinitely. Convergence depends on the policy becoming gradually greedier. Can be less sample efficient than Q-learning for finding the optimal policy if exploration is high.
+* **Python:** Similar structure to Q-learning, but the update uses $Q(s', a')$ where $a'$ is the *next* action chosen by the policy, instead of $\max_{a'} Q(s', a')$.
+* **Eval/Best Practices:** Monitor cumulative reward. Tune $\alpha, \gamma, \epsilon$. Compare with Q-learning based on task requirements (optimality vs. on-policy safety).
+* **Libraries:** Often implemented manually. Available in some RL frameworks.
+* **Math/Subtleties:** TD error: $r + \gamma Q(s', a') - Q(s, a)$. Learns the value function corresponding to the behavior policy. Expected SARSA uses the expected value under the policy instead of the single sampled $Q(s', a')$.
+* **SOTA Improvement:** Foundational on-policy TD algorithm. Basis for Actor-Critic methods where an explicit policy is learned alongside the value function.
+
+---
+
+### 6. Deep Q-Networks (DQN)
+
+* **Explanation:** An extension of Q-learning that uses a deep neural network to approximate the Q-function: $Q(s, a; \theta) \approx Q^*(s, a)$. Allows handling high-dimensional state spaces (like images) where tabular Q-learning is infeasible.
+* **Key Techniques:**
+    * **Neural Network:** Takes state $s$ as input and outputs Q-values for all possible actions $a$.
+    * **Experience Replay:** Store transitions $(s, a, r, s', \text{done})$ in a replay buffer. Train the network on mini-batches randomly sampled from this buffer. This breaks correlations between consecutive samples and improves data efficiency and stability.
+    * **Target Network:** Use a separate network (target network $\hat{Q}$) with parameters $\theta^-$ that are periodically copied from the main Q-network $\theta$. The target Q-value used in the TD update is calculated using this fixed target network: $y_t = r + \gamma \max_{a'} \hat{Q}(s', a'; \theta^-)$. This stabilizes learning by keeping the target fixed for several updates.
+* **Tricks & Treats:** Enabled breakthroughs in playing Atari games directly from pixels. Can handle complex, high-dimensional state spaces.
+* **Caveats/Questions:** Training deep RL models can be unstable and sensitive to hyperparameters. Requires significant computational resources (GPU) and data (interactions). Can still suffer from overestimation bias (addressed by Double DQN).
+* **Python (Conceptual using `Keras`/`TensorFlow` or `PyTorch`):**
+    ```python
+    # Conceptual structure
+    # main_network = build_q_network(num_actions)
+    # target_network = build_q_network(num_actions)
+    # target_network.set_weights(main_network.get_weights())
+    # replay_buffer = ReplayBuffer(capacity)
+    # optimizer = tf.keras.optimizers.Adam(learning_rate)
+
+    # Inside training loop:
+    # state = env.reset()
+    # for step in range(max_steps):
+    #     action = choose_action_epsilon_greedy(state, main_network, epsilon)
+    #     next_state, reward, done, _ = env.step(action)
+    #     replay_buffer.add(state, action, reward, next_state, done)
+    #     state = next_state
+
+    #     # Sample mini-batch from buffer
+    #     states, actions, rewards, next_states, dones = replay_buffer.sample(batch_size)
+
+    #     # Calculate target Q-values using target_network
+    #     target_q_values = rewards + gamma * np.max(target_network.predict(next_states), axis=1) * (1 - dones)
+
+    #     # Calculate loss and update main_network using gradient descent
+    #     with tf.GradientTape() as tape:
+    #         q_values = main_network(states) # Get Q-values for all actions
+    #         action_q_values = tf.reduce_sum(q_values * tf.one_hot(actions, num_actions), axis=1) # Get Q for taken actions
+    #         loss = tf.keras.losses.MSE(target_q_values, action_q_values)
+    #     grads = tape.gradient(loss, main_network.trainable_variables)
+    #     optimizer.apply_gradients(zip(grads, main_network.trainable_variables))
+
+    #     # Periodically update target_network
+    #     if step % update_target_freq == 0:
+    #         target_network.set_weights(main_network.get_weights())
+    ```
+* **Eval/Best Practices:** Monitor average/cumulative reward over episodes. Tune network architecture, learning rate, buffer size, batch size, target network update frequency, exploration strategy. Use extensions like Double DQN, Dueling DQN, Prioritized Experience Replay for improved performance and stability.
+* **Libraries:** `TensorFlow`/`Keras`, `PyTorch` (for network), `Stable-Baselines3`, `Ray RLlib`, `TF-Agents`.
+* **GPU Opt:** **Essential.** Neural network training (forward/backward passes) is computationally intensive and relies heavily on GPU acceleration.
+* **Math/Subtleties:** Loss function (usually MSE or Huber loss) applied to TD error. Experience replay mechanism. Target network update strategy.
+* **SOTA Improvement:** Foundational Deep RL algorithm. Led to many advancements and variants. Now often complemented or replaced by policy gradient and actor-critic methods (PPO, SAC, A3C) for continuous action spaces or more complex tasks, but DQN principles remain influential.
+
+---
+
+### 7. Applications
+
+* **Gaming:** Mastering complex games (Atari, Go, StarCraft, Dota 2).
+* **Robotics:** Learning control policies for manipulation, locomotion, navigation.
+* **Autonomous Systems:** Self-driving car navigation, drone control.
+* **Finance:** Algorithmic trading, portfolio optimization.
+* **Healthcare:** Personalized treatment plans, drug discovery optimization.
+* **Recommender Systems:** Optimizing sequences of recommendations, user interaction.
+* **Operations Research:** Supply chain optimization, resource allocation, scheduling.
+* **NLP:** Dialogue systems, text generation optimization (e.g., RLHF).
+* **Computer Vision:** Active object recognition, visual navigation.
+* **Energy:** Smart grid control, optimizing energy consumption.
+
