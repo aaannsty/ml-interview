@@ -2123,3 +2123,143 @@ Writing a doc for ML tips and techniques as a glance
     * High Variance: Get more training data, use simpler model, increase regularization (L1/L2, Dropout), feature selection.
 * **Eval/Best Practices:** Use learning curves (plotting training and validation error vs. training set size or model complexity) to diagnose bias/variance issues. Use cross-validation to get reliable estimates of generalization error.
 
+## Evaluation Metrics
+
+*Goal: Quantify the performance of machine learning models to compare different models, tune hyperparameters, and understand model effectiveness for a specific task.*
+
+---
+
+### 1. Classification Metrics (Recap)
+
+* **Accuracy:** $\frac{TP + TN}{Total}$. Overall correctness. Can be misleading for imbalanced datasets.
+* **Precision:** $\frac{TP}{TP + FP}$. Proportion of positive predictions that are actually correct. Use when False Positives are costly.
+* **Recall (Sensitivity, True Positive Rate):** $\frac{TP}{TP + FN}$. Proportion of actual positives that were correctly identified. Use when False Negatives are costly.
+* **F1-Score:** $2 \times \frac{Precision \times Recall}{Precision + Recall}$. Harmonic mean of Precision and Recall. Useful for balancing the two, especially with imbalanced data.
+* **Area Under the ROC Curve (AUC-ROC):** ROC curve plots True Positive Rate vs. False Positive Rate at various decision thresholds. AUC represents the probability that the model ranks a random positive instance higher than a random negative instance. Ranges from 0.5 (random) to 1.0 (perfect). Good for comparing models across thresholds and less sensitive to class imbalance than accuracy.
+* **Confusion Matrix:** Table showing TP, TN, FP, FN counts, useful for detailed error analysis.
+* **Log Loss (Cross-Entropy):** Measures performance for classifiers outputting probabilities. Penalizes confident wrong predictions more heavily.
+* **Libraries:** `scikit-learn.metrics` (accuracy_score, precision_score, recall_score, f1_score, roc_auc_score, confusion_matrix, log_loss).
+
+---
+
+### 2. Regression Metrics (Recap)
+
+* **Mean Absolute Error (MAE):** $\frac{1}{n} \sum |y_i - \hat{y}_i|$. Average absolute error, robust to outliers. Units are same as the target variable.
+* **Mean Squared Error (MSE):** $\frac{1}{n} \sum (y_i - \hat{y}_i)^2$. Average squared error, penalizes large errors more. Units are squared.
+* **Root Mean Squared Error (RMSE):** $\sqrt{MSE}$. Square root of MSE, puts error back into original units. Still sensitive to large errors.
+* **R-squared ($R^2$):** $1 - \frac{\sum (y_i - \hat{y}_i)^2}{\sum (y_i - \bar{y})^2}$. Proportion of variance in the target variable explained by the model. Ranges from $-\infty$ to 1 (higher is better).
+* **Adjusted $R^2$:** $R^2$ adjusted for the number of predictors in the model. Less likely to increase just by adding more features.
+* **Libraries:** `scikit-learn.metrics` (mean_absolute_error, mean_squared_error, r2_score).
+
+---
+
+### 3. Mean Average Precision (MAP)
+
+* **Explanation:** A popular metric for evaluating tasks involving ranked retrieval or detection of multiple items, such as Information Retrieval (ranking documents for a query) and Object Detection (ranking detected boxes by confidence). It measures the average quality of rankings across multiple queries or images.
+* **Calculation:**
+    1.  For a single query/image, calculate the **Average Precision (AP)**: Average the precision values obtained each time a relevant item is found in the ranked list. E.g., If relevant items are at ranks 1, 3, 6 out of 10 retrieved, AP = (1/1 + 2/3 + 3/6) / 3. AP rewards finding relevant items early and finding many relevant items.
+    2.  **MAP** is the mean of the AP scores calculated over all queries/images in the test set.
+* **Tricks & Treats:** Considers both precision and the rank order of correct items. Widely used standard for object detection benchmarks (often calculated at different IoU thresholds and averaged).
+* **Caveats/Questions:** Assumes binary relevance (item is relevant or not). Can be sensitive to the total number of relevant items.
+* **Python:** Often implemented within specific evaluation scripts (e.g., COCO evaluation tools for object detection) or information retrieval libraries. `scikit-learn.metrics.average_precision_score` computes AP for a single binary classification/ranking task. Calculating MAP typically involves averaging this over multiple queries/classes.
+    ```python
+    # Conceptual MAP calculation
+    # all_ap_scores = []
+    # for query in queries:
+    #     y_true_ranked, y_scores_ranked = get_ranked_results(query) # Get true labels and scores, sorted
+    #     ap = calculate_average_precision(y_true_ranked) # Custom or library function
+    #     all_ap_scores.append(ap)
+    # map_score = np.mean(all_ap_scores)
+    ```
+* **Math/Subtleties:** Precision at k ($P@k$), Interpolated Precision are related concepts used in AP calculation. Different interpolation methods exist.
+
+---
+
+### 4. Mean Reciprocal Rank (MRR)
+
+* **Explanation:** An evaluation metric primarily used for tasks where the rank of the *first* correct answer in a list of responses is most important (e.g., question answering, search engine query suggestions, recommendation 'hit rate').
+* **Calculation:** For each query $i$, find the rank ($rank_i$) of the first relevant/correct item in the ranked list produced by the system. If no relevant item is found in the list (or within a predefined cutoff), the reciprocal rank is typically 0. The MRR is the average of these reciprocal ranks over all queries ($Q$): $MRR = \frac{1}{|Q|} \sum_{i=1}^{|Q|} \frac{1}{rank_i}$.
+* **Tricks & Treats:** Simple to calculate and interpret. Directly measures how quickly the user finds the first relevant result. Values range from 0 to 1 (higher is better).
+* **Caveats/Questions:** Only considers the first relevant item; ignores the ranks of subsequent relevant items.
+* **Python:** Typically requires custom implementation based on ranked results.
+    ```python
+    # Conceptual MRR calculation
+    # reciprocal_ranks = []
+    # for query in queries:
+    #     ranked_results = get_ranked_results(query) # List of items (relevant=True/False)
+    #     rank = 0
+    #     for i, result in enumerate(ranked_results):
+    #         if result_is_relevant(result):
+    #             rank = i + 1
+    #             break
+    #     reciprocal_ranks.append(1.0 / rank if rank > 0 else 0.0)
+    # mrr_score = np.mean(reciprocal_ranks)
+    ```
+* **Math/Subtleties:** Focuses solely on the multiplicative inverse of the rank of the first correct answer.
+
+---
+
+### 5. Equal Error Rate (EER)
+
+* **Explanation:** A metric commonly used to evaluate biometric verification systems (e.g., speaker verification, face verification, fingerprint matching). These systems typically output a score indicating similarity between a template and a query. A threshold is applied to this score to make an accept/reject decision.
+* **Calculation:** The EER is the point on the ROC curve (or DET curve) where the False Acceptance Rate (FAR - rate at which impostors are incorrectly accepted) equals the False Rejection Rate (FRR - rate at which genuine users are incorrectly rejected). A lower EER value indicates better performance, meaning the system can achieve better separation between genuine and impostor scores.
+* **Tricks & Treats:** Provides a single threshold-independent measure of system performance, balancing false accepts and false rejects equally.
+* **Caveats/Questions:** Assumes FAR and FRR are equally important, which may not be true for all applications (e.g., high-security access might prioritize very low FAR). The operating point (threshold) used in deployment might differ from the EER point.
+* **Python:** Often requires custom calculation by computing FAR and FRR across various thresholds and finding the intersection point. Libraries like `scipy.optimize.brentq` can help find the root where `FAR(threshold) - FRR(threshold) = 0`.
+    ```python
+    # Conceptual EER calculation (needs functions to compute FAR/FRR at threshold)
+    # from scipy.optimize import brentq
+    # from scipy.interpolate import interp1d
+
+    # thresholds = compute_thresholds(...)
+    # fars = compute_far(thresholds, ...)
+    # frrs = compute_frr(thresholds, ...)
+
+    # eer = brentq(lambda x : interp1d(thresholds, fars)(x) - interp1d(thresholds, frrs)(x), thresholds.min(), thresholds.max())
+    # eer_threshold = interp1d(fars, thresholds)(eer) # Find threshold at EER
+    ```
+* **Math/Subtleties:** Involves calculating FAR ($FP / (FP + TN)$) and FRR ($FN / (FN + TP)$) based on genuine and impostor scores and varying decision thresholds. Often visualized using DET (Detection Error Tradeoff) curves (plots FAR vs FRR on non-linear scales).
+
+---
+
+### 6. A/B Testing Fundamentals
+
+* **Explanation:** A method of randomized experimentation used to compare two versions (A and B) of a single variable (e.g., a webpage layout, a recommendation algorithm, an email subject line, a new ML model) to determine which performs statistically significantly better on a chosen key metric (e.g., conversion rate, click-through rate, revenue, model accuracy).
+* **Process:**
+    1.  **Hypothesis:** Formulate a clear hypothesis (e.g., "Version B will increase conversion rate compared to version A"). Define null ($H_0$: no difference) and alternative ($H_1$: difference exists) hypotheses.
+    2.  **Metric:** Choose a quantifiable metric directly related to the hypothesis.
+    3.  **Randomization:** Randomly assign users or traffic into two (or more) groups, ensuring groups are comparable. Group A sees the control version, Group B sees the variation.
+    4.  **Sample Size:** Determine the required sample size per group to detect a statistically significant difference of a certain magnitude (Minimum Detectable Effect - MDE) with desired statistical power (e.g., 80%) and significance level (e.g., $\alpha=0.05$).
+    5.  **Run Test:** Expose users to their assigned versions and collect data on the chosen metric for the predetermined duration or sample size.
+    6.  **Analyze Results:** Use statistical tests (e.g., t-test for means, Z-test for proportions, Chi-squared test for counts) to compare the metric between groups. Calculate the p-value (probability of observing the data, or more extreme data, if the null hypothesis is true).
+    7.  **Conclusion:** If p-value < significance level ($\alpha$), reject $H_0$ and conclude there is a statistically significant difference. Otherwise, fail to reject $H_0$. Calculate confidence intervals for the difference.
+* **Tricks & Treats:** Gold standard for establishing causality (did the change *cause* the observed difference?). Allows data-driven decisions. Applicable to comparing ML models in production.
+* **Caveats/Questions:** Requires careful planning (metric definition, randomization unit, sample size). Potential issues: novelty effect, segmentation effects, running multiple tests simultaneously (multiple comparisons problem). Statistical significance doesn't always mean practical significance.
+* **Python:** Statistical tests available in `scipy.stats` (e.g., `ttest_ind`, proportions_ztest often found in `statsmodels.stats.proportion`). Libraries like `statsmodels` provide more comprehensive tools. Specialized A/B testing platforms exist.
+    ```python
+    from scipy import stats
+    import numpy as np
+
+    # Example: Comparing conversion rates (proportions)
+    # conversions_A, visitors_A = 100, 1000
+    # conversions_B, visitors_B = 125, 1000
+
+    # rate_A = conversions_A / visitors_A
+    # rate_B = conversions_B / visitors_B
+
+    # Using independent t-test on Bernoulli trials (approximation for large samples)
+    # Can also use z-test for proportions (more accurate)
+    # group_A_outcomes = np.array([1]*conversions_A + [0]*(visitors_A - conversions_A))
+    # group_B_outcomes = np.array([1]*conversions_B + [0]*(visitors_B - conversions_B))
+    # t_stat, p_value = stats.ttest_ind(group_A_outcomes, group_B_outcomes, equal_var=False)
+
+    # print(f"T-statistic: {t_stat:.4f}")
+    # print(f"P-value: {p_value:.4f}")
+    # alpha = 0.05
+    # if p_value < alpha:
+    #     print("Reject null hypothesis: Significant difference.")
+    # else:
+    #     print("Fail to reject null hypothesis: No significant difference.")
+    ```
+* **Math/Subtleties:** Hypothesis testing, p-values, confidence intervals, statistical power, Minimum Detectable Effect (MDE), Type I error ($\alpha$), Type II error ($\beta$).
+
