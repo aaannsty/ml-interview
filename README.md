@@ -2263,3 +2263,347 @@ Writing a doc for ML tips and techniques as a glance
     ```
 * **Math/Subtleties:** Hypothesis testing, p-values, confidence intervals, statistical power, Minimum Detectable Effect (MDE), Type I error ($\alpha$), Type II error ($\beta$).
 
+## Advanced Deep Learning & Large Models
+
+*Goal: Explore state-of-the-art architectures (primarily Transformers), training paradigms (pre-training, fine-tuning, PEFT, RLHF), and applications (LLMs, VLMs) that define the current cutting edge of AI.*
+
+---
+
+### 1. Transformer Architecture
+
+* **Explanation:** Introduced in "Attention Is All You Need" (2017), Transformers eschew recurrence and rely entirely on **attention mechanisms** to model dependencies between input tokens. This allows for significantly more parallelization than RNNs and better capture of long-range dependencies. The core component is the **self-attention** mechanism, which allows each token in a sequence to attend to (i.e., weigh the importance of) all other tokens in the sequence (including itself) when computing its representation.
+* **Key Components:**
+    * **Scaled Dot-Product Attention:** The fundamental building block. For a set of queries $Q$, keys $K$, and values $V$ (all derived from input embeddings via linear projections), attention is calculated as:
+        $$Attention(Q, K, V) = softmax(\frac{QK^T}{\sqrt{d_k}})V$$
+        Here, $d_k$ is the dimension of the keys/queries. The dot products $QK^T$ compute similarity scores between queries and keys. Scaling by $\sqrt{d_k}$ prevents gradients from becoming too small. Softmax turns scores into attention weights (probabilities summing to 1). The output is a weighted sum of the value vectors.
+    * **Multi-Head Attention:** Instead of performing a single attention calculation, the model linearly projects Q, K, V *h* times (number of heads) with different learned projections. Attention is computed for each head in parallel. The outputs are concatenated and linearly projected again. This allows the model to jointly attend to information from different representation subspaces at different positions.
+        $$MultiHead(Q, K, V) = Concat(\text{head}_1, ..., \text{head}_h)W^O$$
+        $$\text{where } \text{head}_i = Attention(QW_i^Q, KW_i^K, VW_i^V)$$
+        $W_i^Q, W_i^K, W_i^V, W^O$ are learned parameter matrices.
+    * **Positional Encoding:** Since self-attention is permutation-invariant, explicit positional information (using sinusoidal functions or learned embeddings) is added to the input embeddings to inform the model about token order.
+    * **Feed-Forward Networks (FFN):** Applied independently to each position after the attention layer. Typically consists of two linear transformations with a non-linear activation (e.g., ReLU or GeLU) in between.
+    * **Layer Normalization & Residual Connections:** Applied around each sub-layer (Attention and FFN) to stabilize training and enable deeper networks.
+* **Variants:** Encoder-only (BERT - good for NLU), Decoder-only (GPT - good for generation), Encoder-Decoder (Original Transformer, T5, BART - good for seq2seq tasks like translation/summarization).
+* **Code Use Case (Conceptual Loading Config with Transformers):**
+    ```python
+    from transformers import AutoConfig, AutoModel
+
+    # Load configuration for a pre-trained model
+    config = AutoConfig.from_pretrained("bert-base-uncased")
+    print("Model Config:", config)
+
+    # You could instantiate a model from this config (random weights)
+    # model_from_config = AutoModel.from_config(config)
+
+    # Or load pre-trained weights (more common)
+    # model = AutoModel.from_pretrained("bert-base-uncased")
+    ```
+* **Libraries:** `Transformers` (Hugging Face), `TensorFlow`/`Keras`, `PyTorch`.
+* **GPU Opt:** Architecture design facilitates parallel computation, making GPUs essential.
+
+---
+
+### 2. Pre-training & Transfer Learning
+
+* **Explanation:** This two-stage process is the standard for training large, powerful models:
+    1.  **Pre-training:** A large Transformer model is trained on enormous amounts of *unlabeled* text (or other modalities like images) using *self-supervised* objectives. The model learns general statistical patterns, syntax, semantics, and world knowledge from the data. Common objectives:
+        * **Masked Language Modeling (MLM):** Used in BERT. Randomly mask ~15% of input tokens; the model must predict the original masked tokens based on bidirectional context.
+        * **Causal Language Modeling (CLM) / Next Token Prediction:** Used in GPT. Predict the next token in a sequence given the preceding tokens. Inherently unidirectional.
+    2.  **Fine-tuning:** The pre-trained model is adapted for a specific *downstream task* (e.g., sentiment analysis, question answering) using a smaller, *labeled* dataset specific to that task. Often involves adding a small task-specific head (e.g., a classification layer) and updating some or all of the pre-trained weights using standard supervised learning.
+* **Tricks & Treats:** Enables SOTA performance on many tasks with relatively small labeled datasets by leveraging knowledge learned during expensive pre-training. Facilitates the development of "foundation models" adaptable to various applications.
+* **Caveats/Questions:** Pre-training is prohibitively expensive for most. Fine-tuning large models still requires substantial compute. Potential for pre-training data biases to persist. Risk of "catastrophic forgetting" during fine-tuning (mitigated by techniques like lower learning rates, PEFT).
+* **Code Use Case (Basic Fine-tuning with Transformers):**
+    ```python
+    from transformers import AutoTokenizer, AutoModelForSequenceClassification, Trainer, TrainingArguments
+    # Assume 'train_dataset', 'eval_dataset' are preprocessed Hugging Face datasets
+    # (e.g., {'text': [...], 'label': [...]})
+
+    model_name = "distilbert-base-uncased" # Smaller BERT variant
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+
+    def tokenize_function(examples):
+        return tokenizer(examples["text"], padding="max_length", truncation=True)
+
+    # tokenized_train_dataset = train_dataset.map(tokenize_function, batched=True)
+    # tokenized_eval_dataset = eval_dataset.map(tokenize_function, batched=True)
+
+    model = AutoModelForSequenceClassification.from_pretrained(model_name, num_labels=2) # Example: 2 classes
+
+    training_args = TrainingArguments(
+        output_dir="./results",
+        evaluation_strategy="epoch",
+        per_device_train_batch_size=16,
+        per_device_eval_batch_size=16,
+        num_train_epochs=1, # Fine-tuning often requires few epochs
+        weight_decay=0.01,
+        learning_rate=2e-5,
+        logging_dir='./logs',
+    )
+
+    trainer = Trainer(
+        model=model,
+        args=training_args,
+        train_dataset=tokenized_train_dataset,
+        eval_dataset=tokenized_eval_dataset,
+        # compute_metrics=compute_metrics_function, # Needs a function to calc accuracy/F1 etc.
+    )
+
+    # trainer.train() # Start fine-tuning
+    ```
+* **Libraries:** `Transformers`, `TensorFlow`/`Keras`, `PyTorch`, `fastai`.
+
+---
+
+### 3. Parameter-Efficient Fine-Tuning (PEFT)
+
+* **Explanation:** A collection of techniques designed to adapt large pre-trained models (LLMs, VLMs) to downstream tasks by modifying only a small subset of the model's parameters, while keeping the majority of the original weights frozen. This significantly reduces the computational and memory requirements for fine-tuning and storage.
+* **Popular Forms:**
+    * **LoRA (Low-Rank Adaptation):** Freezes pre-trained weights $W_0$. Learns a low-rank update $\Delta W = BA$, where $B \in \mathbb{R}^{d \times r}$ and $A \in \mathbb{R}^{r \times k}$ with rank $r \ll \min(d, k)$. The adapted weight matrix used during inference is $W = W_0 + BA$. Only $A$ and $B$ (low-rank matrices) are trained. $A$ is typically initialized randomly (e.g., Gaussian), $B$ often with zeros. The update is often scaled by $\alpha/r$, where $\alpha$ is a hyperparameter. Applied typically to attention weight matrices.
+    * **Adapter Tuning:** Inserts small, trainable "adapter" modules (typically bottleneck feed-forward layers) within each layer (or specific layers) of the frozen pre-trained model. Only the parameters of these adapter modules are trained.
+    * **Prompt Tuning:** Keeps the entire pre-trained model frozen. Learns a small set of continuous vectors ("soft prompt" or "prompt embeddings") that are prepended to the input sequence embeddings. These learned prompts steer the frozen model's behavior towards the target task.
+    * **Prefix Tuning:** Similar to Prompt Tuning, but inserts learnable prefix vectors into the keys and values of the multi-head attention blocks in each layer, offering more direct control over attention mechanisms.
+* **Use Cases:** Fine-tuning massive models (e.g., > 7B parameters) on limited hardware (single/consumer GPUs). Faster training iterations. Deploying many task-specific models efficiently (only need to store small PEFT adapters/prompts + single base model). Mitigating catastrophic forgetting.
+* **Code Use Case (LoRA Fine-tuning with `PEFT` Library):**
+    ```python
+    from transformers import AutoModelForSequenceClassification, AutoTokenizer, Trainer, TrainingArguments
+    from peft import get_peft_model, LoraConfig, TaskType
+    # Assume 'tokenized_train_dataset', 'tokenized_eval_dataset' are ready
+
+    model_name = "bert-base-uncased" # Using a smaller model for demo feasibility
+    num_labels = 2 # Example binary classification
+
+    # 1. Load Base Model
+    model = AutoModelForSequenceClassification.from_pretrained(model_name, num_labels=num_labels)
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    # (Ensure datasets are tokenized as shown in the fine-tuning example)
+
+    # 2. Define LoRA Configuration
+    lora_config = LoraConfig(
+        task_type=TaskType.SEQ_CLS, # Specify task type
+        r=8,                        # LoRA rank (small value)
+        lora_alpha=16,              # LoRA alpha scaling
+        lora_dropout=0.1,
+        target_modules=["query", "value"] # Apply LoRA to query and value matrices in attention
+    )
+
+    # 3. Wrap model with PEFT config
+    peft_model = get_peft_model(model, lora_config)
+    peft_model.print_trainable_parameters() # Shows significantly fewer trainable params
+
+    # 4. Define Training Arguments (similar to full fine-tuning)
+    training_args = TrainingArguments(
+        output_dir="./peft_results",
+        learning_rate=1e-3, # Often higher LR works for PEFT
+        per_device_train_batch_size=16,
+        per_device_eval_batch_size=16,
+        num_train_epochs=3, # May need more epochs than full fine-tuning
+        weight_decay=0.01,
+        evaluation_strategy="epoch",
+        save_strategy="epoch",
+        load_best_model_at_end=True,
+    )
+
+    # 5. Define Trainer (using the PEFT model)
+    trainer = Trainer(
+        model=peft_model, # Use the PEFT-wrapped model
+        args=training_args,
+        train_dataset=tokenized_train_dataset,
+        eval_dataset=tokenized_eval_dataset,
+        # compute_metrics=compute_metrics_function,
+    )
+
+    # 6. Train (only LoRA adapters are updated)
+    # trainer.train()
+
+    # 7. Save Adapters (only saves the small trained adapter weights)
+    # peft_model.save_pretrained("./saved_lora_adapter")
+    ```
+* **Libraries:** `PEFT` (Hugging Face), integrations within major frameworks.
+* **GPU Opt:** The main benefit *is* GPU optimization by drastically reducing memory requirements for gradients and optimizer states, enabling training on smaller GPUs.
+
+---
+
+### 4. Retrieval-Augmented Generation (RAG)
+
+* **Explanation:** A technique to improve the outputs of Large Language Models (LLMs), especially for knowledge-intensive tasks, by grounding them in external, up-to-date information retrieved from a knowledge source. Instead of relying solely on the LLM's potentially outdated or incomplete internal knowledge, RAG first retrieves relevant passages and then provides them as context to the LLM along with the user's prompt to generate the final response.
+* **Workflow:**
+    1.  **Indexing:** An external knowledge base (e.g., collection of documents, PDFs, websites) is processed, chunked, converted into vector embeddings (using models like Sentence-BERT), and stored in a **Vector Database/Index**.
+    2.  **Retrieval:** When a user query arrives, it's embedded into the same vector space. A similarity search (e.g., cosine similarity, dot product) is performed against the indexed document chunks in the vector database to find the most relevant chunks.
+    3.  **Augmentation:** The retrieved chunks are combined with the original user query to form an augmented prompt.
+    4.  **Generation:** The augmented prompt is fed into the LLM, which generates a response grounded in the provided context.
+* **Tricks & Treats:** Reduces LLM hallucination (making things up). Allows providing responses based on current or private/domain-specific information not present in the LLM's training data. Can provide citations/sources.
+* **Caveats/Questions:** Performance heavily depends on the quality of the retrieval step (finding the *right* information). Requires setting up and maintaining the indexing/retrieval pipeline. Context window limitations of the LLM can restrict the amount of retrieved information used. Chunking strategy and embedding model choice are important.
+* **Code Use Case (Conceptual using `LangChain` ideas):**
+    ```python
+    # Conceptual workflow using LangChain-like components
+    # from langchain.document_loaders import PyPDFLoader
+    # from langchain.text_splitter import RecursiveCharacterTextSplitter
+    # from langchain.embeddings import HuggingFaceEmbeddings
+    # from langchain.vectorstores import FAISS # Or Chroma, Pinecone etc.
+    # from langchain.llms import Ollama # Or OpenAI, Anthropic etc.
+    # from langchain.prompts import PromptTemplate
+    # from langchain.chains import RetrievalQA
+
+    # 1. Load & Split Documents
+    # loader = PyPDFLoader("my_document.pdf")
+    # documents = loader.load()
+    # text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
+    # texts = text_splitter.split_documents(documents)
+
+    # 2. Create Embeddings & Vector Store
+    # embedding_model = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+    # vector_store = FAISS.from_documents(texts, embedding_model)
+    # retriever = vector_store.as_retriever(search_kwargs={'k': 3}) # Retrieve top 3 chunks
+
+    # 3. Setup LLM & Prompt
+    # llm = Ollama(model="llama3") # Example using local Ollama
+    # prompt_template = """Use the following context to answer the question.
+    # Context: {context}
+    # Question: {question}
+    # Answer:"""
+    # QA_PROMPT = PromptTemplate(template=prompt_template, input_variables=["context", "question"])
+
+    # 4. Create RAG Chain/Pipeline
+    # qa_chain = RetrievalQA.from_chain_type(
+    #     llm=llm,
+    #     chain_type="stuff", # Simple method: 'stuff' all context into prompt
+    #     retriever=retriever,
+    #     chain_type_kwargs={"prompt": QA_PROMPT}
+    # )
+
+    # 5. Run Query
+    # query = "What is the main topic of the document?"
+    # response = qa_chain.run(query)
+    # print(response)
+    ```
+* **Libraries:** `LangChain`, `LlamaIndex`, `Haystack`; Vector Databases: `FAISS`, `ChromaDB`, `Pinecone`, `Weaviate`; Embedding models via `sentence-transformers`, `Transformers`.
+* **GPU Opt:** Embedding generation and LLM inference benefit from GPUs. Vector search can also be GPU-accelerated (e.g., FAISS-GPU).
+
+---
+
+### 5. Reinforcement Learning from Human Feedback (RLHF)
+
+* **Explanation:** A technique primarily used to fine-tune pre-trained language models to better align with complex, often subjective human preferences regarding helpfulness, honesty, and harmlessness. It uses human feedback to train a reward model, which then guides the fine-tuning of the language model using RL.
+* **Three Main Stages:**
+    1.  **Supervised Fine-Tuning (SFT):** Fine-tune a pre-trained LLM on a dataset of high-quality prompt-response pairs (often curated or human-written) to adapt it to the desired style/domain (e.g., instruction following, dialogue).
+    2.  **Reward Modeling (RM):** Generate multiple responses from the SFT model for various prompts. Have human labelers rank these responses from best to worst. Train a separate model (the RM, often initialized from the SFT model) to predict a scalar "preference" score given a prompt and a response, based on the human ranking data.
+    3.  **RL Fine-tuning (PPO):** Treat the SFT model (now the policy $\pi_\theta$) as an RL agent. For a given prompt (state), the policy generates a response (action). The RM provides a reward $r_\phi$. Use an RL algorithm, typically **Proximal Policy Optimization (PPO)**, to update the policy ($\pi_\theta$) to maximize the expected reward from the RM. A **KL-divergence penalty** term is crucial here: the objective function penalizes the policy $\pi_\theta$ for deviating too far from the original SFT policy $\pi_{ref}$, ensuring stability and preventing the model from forgetting its language capabilities while optimizing for the reward. The objective looks roughly like: Maximize $E [r_\phi(x, y) - \beta D_{KL}(\pi_\theta(y|x) || \pi_{ref}(y|x))]$.
+* **Use Cases/Impact:** Crucial for creating helpful and safe conversational AI like ChatGPT, Claude. Improves instruction following, reduces harmful outputs, enhances controllability.
+* **Caveats/Questions:** Highly complex and resource-intensive (requires large-scale human annotation, complex RL training setup). Quality heavily depends on human preference data and the learned reward model. Potential for "reward hacking" (exploiting flaws in the RM). Alignment is an ongoing research challenge.
+* **Code Use Case (Conceptual with `TRL`):**
+    ```python
+    # Conceptual use with Hugging Face TRL library
+    # from trl import PPOConfig, PPOTrainer, AutoModelForCausalLMWithValueHead
+    # from transformers import AutoTokenizer
+
+    # config = PPOConfig(...) # Define PPO hyperparameters (lr, batch_size, kl_penalty coeff beta)
+
+    # 1. Load SFT model (becomes policy) & Reward Model (or use one model for both)
+    # policy_model = AutoModelForCausalLMWithValueHead.from_pretrained("sft_model_path")
+    # reward_model = AutoModelForCausalLMWithValueHead.from_pretrained("reward_model_path") # Separate head needed
+    # tokenizer = AutoTokenizer.from_pretrained("sft_model_path")
+
+    # 2. Initialize PPOTrainer
+    # ppo_trainer = PPOTrainer(config, policy_model, ref_model=None, tokenizer=tokenizer, dataset=prompt_dataset, data_collator=...)
+
+    # 3. Training Loop (simplified)
+    # for batch in ppo_trainer.dataloader:
+    #     query_tensors = batch['input_ids']
+    #
+    #     # Generate responses from policy model
+    #     response_tensors = ppo_trainer.generate(query_tensors, **generation_kwargs)
+    #     batch['response'] = tokenizer.batch_decode(response_tensors)
+    #
+    #     # Compute reward scores from RM
+    #     texts = [q + r for q, r in zip(batch['query'], batch['response'])]
+    #     reward_outputs = reward_model(tokenizer(texts, return_tensors='pt').input_ids)
+    #     rewards = [output for output in reward_outputs] # Get scalar reward scores
+    #
+    #     # Run PPO step (computes advantages, losses including KL penalty, updates policy)
+    #     stats = ppo_trainer.step(query_tensors, response_tensors, rewards)
+    #     ppo_trainer.log_stats(stats, batch, rewards)
+    ```
+* **Libraries:** `TRL` (Hugging Face), `DeepSpeed Chat`, custom implementations using base `Transformers`, `PyTorch`/`TensorFlow`, and RL libraries.
+* **GPU Opt:** Requires significant GPU resources for training multiple large models (policy, reward model, possibly reference model) and running RL optimization.
+
+---
+
+### 6. Vision Transformers (ViT)
+
+* **Explanation:** Adapts the Transformer architecture for computer vision tasks, primarily image classification. Instead of processing sequences of word tokens, ViT processes sequences of image patches.
+* **Mechanism:**
+    1.  **Patch Embedding:** Split input image into fixed-size, non-overlapping patches (e.g., 16x16 pixels).
+    2.  **Linear Projection:** Flatten each patch and linearly project it into a vector embedding.
+    3.  **Positional Embedding:** Add learnable positional embeddings to the patch embeddings to retain spatial information.
+    4.  **\[CLS] Token:** Prepend a special learnable `[CLS]` token embedding to the sequence (similar to BERT).
+    5.  **Transformer Encoder:** Feed the resulting sequence of embeddings (\[CLS] + patches + positions) into a standard Transformer Encoder stack (Multi-Head Self-Attention + FFN layers).
+    6.  **Classification Head:** Attach an MLP head to the output representation corresponding to the `[CLS]` token and train for classification.
+* **Tricks & Treats:** Achieves competitive or SOTA performance on image classification benchmarks, especially with large-scale pre-training. Less reliant on image-specific inductive biases compared to CNNs, potentially more generalizable. Attention mechanism captures global relationships well.
+* **Caveats/Questions:** Data-hungry; often requires larger datasets (e.g., ImageNet-21k, JFT-300M) or significant augmentation/regularization to outperform CNNs when trained from scratch on smaller datasets like ImageNet-1k. Computationally intensive.
+* **Code Use Case (Using `Transformers` Pipeline):**
+    ```python
+    from transformers import pipeline
+
+    # Load a pre-trained ViT model fine-tuned for image classification
+    image_classifier = pipeline("image-classification", model="google/vit-base-patch16-224")
+
+    # Classify an image
+    image_path = "path/to/your/image.jpg"
+    predictions = image_classifier(image_path)
+    print(predictions)
+    # Output might be: [{'score': 0.995, 'label': 'Egyptian cat'}, ...]
+    ```
+* **Libraries:** `Transformers`, `timm` (PyTorch Image Models), `TensorFlow`/`Keras`, `PyTorch`.
+* **GPU Opt:** Essential for training and efficient inference.
+
+---
+
+### 7. Vision-Language Models (VLM) / Large Vision Assistants (LVA)
+
+* **Explanation:** Multimodal models that jointly process and relate information from visual (images/video) and textual modalities. They typically combine a vision encoder (like a ViT or CNN) with a language model (like a Transformer decoder or encoder-decoder).
+* **Architectures & Techniques:**
+    * **Shared Embedding Space:** Learn to map images and text into a common space where related concepts are close (e.g., **CLIP** - Contrastive Language-Image Pre-training, uses contrastive loss on massive image-text pairs).
+    * **Fusion Methods:** Combine visual and textual features at different stages (early, late, or via cross-modal attention mechanisms).
+    * **Instruction Tuning:** Fine-tuning VLMs on datasets containing visual inputs paired with instructions and desired textual outputs (e.g., **LLaVA** - Large Language and Vision Assistant).
+* **Capabilities:** Zero-shot image classification (CLIP), image/video captioning, Visual Question Answering (VQA), image-text retrieval, visual reasoning, visual dialogue, following complex visual instructions (LVAs).
+* **Code Use Case (VQA using `Transformers` Pipeline):**
+    ```python
+    from transformers import pipeline
+
+    # Load a VQA pipeline (often based on models like BLIP or ViT+BERT)
+    vqa_pipeline = pipeline("visual-question-answering", model="dandelin/vilt-b32-finetuned-vqa")
+
+    image_path = "path/to/your/image.jpg"
+    question = "What color is the cat?"
+
+    answer = vqa_pipeline(image_path, question=question, top_k=1)
+    print(answer)
+    # Output might be: [{'score': 0.95, 'answer': 'black'}]
+    ```
+* **Eval/Best Practices:** Evaluation depends heavily on the task: Accuracy/F1/CIDEr/BLEU/ROUGE for captioning, VQA accuracy for VQA, retrieval metrics (Recall@k) for retrieval, zero-shot accuracy for CLIP-style models.
+* **Libraries:** `Transformers`, `OpenCLIP`, specific model repositories (LLaVA, MiniGPT-4), `PyTorch`, `TensorFlow`.
+* **GPU Opt:** Essential due to large model sizes and complex cross-modal interactions.
+
+---
+
+### 8. Inference Optimizations (incl. KV Cache)
+
+* **Explanation:** Techniques to make inference (using a trained model for prediction) with large Transformer models faster and more memory-efficient, crucial for deployment, especially for real-time or interactive applications like chatbots.
+* **KV Cache:** During autoregressive text generation (predicting one token at a time), the Keys (K) and Values (V) computed by the attention layers for *previous* tokens are stored (cached). For generating the next token, only the K and V for the *current* token need to be computed; the cached K/V from previous steps are reused, avoiding redundant computation over the entire sequence length at each step.
+    * **Challenge:** This KV cache consumes significant GPU memory, growing linearly with sequence length and batch size, often becoming the memory bottleneck during inference. Memory cost is roughly proportional to `batch_size * sequence_length * num_layers * num_heads * head_dim * 2`.
+* **Optimization Techniques:**
+    * **Quantization:** Reducing the numerical precision of model weights, activations, and/or the KV cache (e.g., from FP16 to INT8, INT4, or lower). Reduces memory footprint and can increase computation speed on compatible hardware. Requires calibration or Quantization-Aware Training (QAT) to maintain accuracy.
+    * **Attention Variants (for KV Cache Size):**
+        * **Multi-Query Attention (MQA):** Uses multiple query heads but shares a single Key and Value head across them. Drastically reduces the size of the KV cache.
+        * **Grouped-Query Attention (GQA):** A compromise between Multi-Head (MHA) and MQA. Shares K/V heads across *groups* of query heads. Offers a better balance between speed/memory and model quality than MQA for some models.
+    * **Optimized Attention Kernels (for Speed/Memory):**
+        * **FlashAttention (v1, v2, v3):** An I/O-aware attention algorithm that reorders computations to minimize slow reads/writes between different levels of GPU memory (HBM and SRAM). Fuses attention operations into fewer kernel launches. Significantly faster and more memory-efficient than standard attention, especially for long sequences.
+    * **Efficient KV Cache Management:**
+        * **PagedAttention:** (Used in vLLM) Manages the KV cache using virtual memory concepts (paging). Stores the cache in non-contiguous memory blocks (pages), allocated on demand. Reduces memory fragmentation and waste, allowing for much higher batch throughput via techniques like continuous batching.
+    * **Other:** Layer fusion, kernel auto-tuning, compiler optimizations (e.g., via TensorRT).
+* **Frameworks/Libraries Implementing Optimizations:**
+    * `vLLM`: High-throughput LLM serving library using PagedAttention and continuous batching.
+    * `TensorRT-LLM`: NVIDIA library for optimizing LLM inference on NVIDIA GPUs, implementing quantization, attention variants, optimized kernels, etc. Integrates with Triton Inference Server.
+    * `DeepSpeed Inference`: Part of the DeepSpeed library, offers optimizations like quantization and specialized kernels.
+    * `Text Generation Inference (TGI)` (Hugging Face): Production-ready server implementing many optimizations like continuous batching and quantization.
+* **GPU Opt:** These techniques are *all about* optimizing execution on GPUs, targeting memory bandwidth, memory capacity, and compute utilization.
