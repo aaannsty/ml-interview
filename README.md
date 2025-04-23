@@ -1065,3 +1065,179 @@ Writing a doc for ML tips and techniques as a glance
 * **GPU Opt:** The final K-Means step can be accelerated using `cuml.cluster.KMeans`. Eigen-decomposition can leverage GPU linear algebra libraries (cuSOLVER), though direct integration in scikit-learn is limited.
 * **Math/Subtleties:** Graph Laplacian, eigenvectors as embedding, relationship to graph partitioning (Normalized Cut). Different Laplacian variants exist (unnormalized, symmetric normalized, random walk normalized).
 * **SOTA Improvement:** Powerful graph-based clustering. Research focuses on scalability (e.g., using Nyström method for approximate eigenvectors) and robust graph construction.
+
+## Sequential Models
+
+*Goal: Model data where the order of elements is significant (e.g., time series, text, speech, genomic sequences). Tasks include predicting future elements, classifying sequences, or labeling each element in a sequence.*
+
+---
+
+### 1. Hidden Markov Model (HMM)
+
+* **Explanation:** A generative probabilistic graphical model used for modeling sequences. It assumes there's an underlying sequence of unobserved (hidden) states that follow the Markov property (next state depends only on the current state). Each hidden state emits an observable symbol based on an emission probability distribution.
+* **Key Components:**
+    * Set of hidden states ($S$).
+    * Set of observable symbols ($O$).
+    * Initial state probabilities ($\pi$).
+    * State transition probabilities ($A$: $P(s_t | s_{t-1})$).
+    * Emission probabilities ($B$: $P(o_t | s_t)$).
+* **Core Problems & Algorithms:**
+    * **Evaluation:** $P(O | \text{model})$ - Forward algorithm.
+    * **Decoding:** Find most likely hidden state sequence given observations ($\arg\max_S P(S|O, \text{model})$) - Viterbi algorithm.
+    * **Learning:** Estimate model parameters ($\pi, A, B$) from observations - Baum-Welch algorithm (an Expectation-Maximization variant).
+* **Tricks & Treats:** Simple and interpretable probabilistic model. Effective for tasks like basic POS tagging, speech recognition word alignment.
+* **Caveats/Questions:** Strong assumptions: Markov property for states, output independence given state (observation at time *t* only depends on state at time *t*). Struggles with long-range dependencies and complex feature interactions.
+* **Python (using `hmmlearn`):**
+    ```python
+    # Note: hmmlearn is in limited maintenance mode but usable
+    from hmmlearn import hmm
+    import numpy as np
+
+    # Example: Weather (Hidden: Sunny/Rainy) predicts Activity (Observed: Walk/Shop/Clean)
+    # Define model parameters (replace with learned parameters in practice)
+    # model = hmm.MultinomialHMM(n_components=2, random_state=42) # 2 hidden states
+    # model.startprob_ = np.array([0.6, 0.4]) # P(Sunny), P(Rainy) at t=0
+    # model.transmat_ = np.array([[0.7, 0.3], [0.4, 0.6]]) # P(S->S), P(S->R); P(R->S), P(R->R)
+    # model.emissionprob_ = np.array([[0.1, 0.4, 0.5], [0.6, 0.3, 0.1]]) # P(Walk|S), P(Shop|S), P(Clean|S); P(Walk|R), ...
+
+    # Given observations (e.g., Walk=0, Shop=1, Clean=2)
+    # observations = np.array([[0, 2, 1, 0]]).T # Shape (n_samples, 1)
+
+    # Predict hidden states (Viterbi)
+    # logprob, hidden_states = model.predict(observations) # Returns log probability and state sequence
+    # print("Observations:", observations.flatten())
+    # print("Predicted states:", hidden_states) # e.g., [1 0 0 1] -> Rainy, Sunny, Sunny, Rainy
+
+    # Learn parameters from data (Baum-Welch)
+    # model.fit(observations_list) # Needs list of observation sequences
+    ```
+* **Eval/Best Practices:** Evaluate based on task (e.g., accuracy for POS tagging). Use Viterbi for decoding. Baum-Welch for unsupervised training.
+* **Libraries:** `hmmlearn`, `pomegranate`.
+* **GPU Opt:** Typically CPU-bound due to iterative nature of algorithms.
+* **Math/Subtleties:** Forward-Backward algorithm, Viterbi algorithm, Baum-Welch (EM). Log probabilities used to prevent underflow.
+* **SOTA Improvement:** Foundational. Largely superseded by CRFs and especially RNNs/Transformers for complex sequence labeling due to limiting assumptions.
+
+---
+
+### 2. Conditional Random Fields (CRF)
+
+* **Explanation:** A discriminative undirected probabilistic graphical model used for sequence labeling (and other structured prediction tasks). Unlike HMMs (which model joint probability $P(O, S)$), CRFs model the conditional probability $P(S | O)$ directly. This avoids the need to model the observation distribution and allows incorporating arbitrary, overlapping features from the observation sequence $O$ without strong independence assumptions. Linear-chain CRFs are common for sequences.
+* **Key Idea:** Defines a probability distribution over label sequences $S$ given an observation sequence $O$, based on feature functions $f_k(s_{t-1}, s_t, O, t)$ that depend on current/previous labels and the *entire* observation sequence: $P(S | O) = \frac{1}{Z(O)} \exp(\sum_t \sum_k \lambda_k f_k(s_{t-1}, s_t, O, t))$. $\lambda_k$ are learned weights, $Z(O)$ is a normalization constant (partition function).
+* **Tricks & Treats:** Often outperforms HMMs on sequence labeling tasks (NER, POS) because it handles overlapping features and dependencies better. Avoids HMM's label bias problem.
+* **Caveats/Questions:** Training can be more complex and computationally expensive than HMMs (requires iterative optimization like L-BFGS). Requires feature engineering (though deep learning variants mitigate this). Inference (finding best sequence) uses Viterbi-like algorithms.
+* **Python (using `sklearn-crfsuite` / `python-crfsuite`):**
+    ```python
+    # Conceptual - requires feature extraction function 'word2features'
+    # import sklearn_crfsuite
+    # from sklearn_crfsuite import metrics
+
+    # Assume X_train/X_test are lists of lists of feature dicts for each word
+    # Assume y_train/y_test are lists of lists of labels for each word
+    # X_train = [[word2features(sent, i) for i in range(len(sent))] for sent in train_sents]
+    # y_train = [[get_label(word) for word in sent] for sent in train_sents]
+    # ... similar for X_test, y_test ...
+
+    # crf = sklearn_crfsuite.CRF(
+    #     algorithm='lbfgs',
+    #     c1=0.1, # L1 penalty
+    #     c2=0.1, # L2 penalty
+    #     max_iterations=100,
+    #     all_possible_transitions=True
+    # )
+    # crf.fit(X_train, y_train)
+
+    # y_pred = crf.predict(X_test)
+
+    # Evaluate
+    # print(metrics.flat_f1_score(y_test, y_pred, average='weighted'))
+    # print(metrics.flat_classification_report(y_test, y_pred))
+    ```
+* **Eval/Best Practices:** Use sequence labeling metrics (F1-score, Precision, Recall - often token-level or entity-level for NER). Feature engineering is key for traditional CRFs. Tune regularization parameters (c1, c2).
+* **Libraries:** `python-crfsuite`, `sklearn-crfsuite`.
+* **GPU Opt:** Training is typically CPU-bound.
+* **Math/Subtleties:** Log-linear model. Feature functions. Partition function calculation. Viterbi for inference. Gradient-based optimization (L-BFGS).
+* **SOTA Improvement:** Was SOTA for many sequence labeling tasks before deep learning. Often used as the final layer in BiLSTM-CRF models to incorporate label transition constraints.
+
+---
+
+### 3. Recurrent Neural Network (RNN)
+
+* **Explanation:** A class of neural networks designed for sequential data. Unlike feedforward networks, RNNs have connections that form directed cycles, allowing them to maintain an internal *hidden state* (memory) that captures information about previous elements in the sequence. The same function and parameters are applied to each element of the sequence.
+* **Algorithm:** At each time step *t*, the hidden state $h_t$ is computed based on the current input $x_t$ and the previous hidden state $h_{t-1}$: $h_t = f(W_{hh}h_{t-1} + W_{xh}x_t + b_h)$. An output $y_t$ can be computed from $h_t$: $y_t = g(W_{hy}h_t + b_y)$.
+* **Tricks & Treats:** Can theoretically model arbitrary long-range dependencies. Parameter sharing makes them efficient for variable-length sequences. Forms the basis for more advanced sequence models like LSTMs and GRUs.
+* **Caveats/Questions:** Basic ("vanilla") RNNs suffer from the *vanishing gradient problem* (gradients shrink exponentially during backpropagation through time, making it hard to learn long-range dependencies) and sometimes *exploding gradients*. They struggle to remember information over many time steps.
+* **Python (Simple RNN using `Keras`):**
+    ```python
+    from tensorflow import keras
+    from tensorflow.keras import layers
+
+    # Assume input_shape = (timesteps, features) e.g., (None, 10) for variable length sequences with 10 features
+    # model = keras.Sequential([
+    #     layers.Input(shape=(None, 10)),
+    #     # SimpleRNN layer - units = dimensionality of hidden state/output
+    #     layers.SimpleRNN(64, return_sequences=True), # return_sequences=True if next layer is RNN or for sequence labeling
+    #     layers.SimpleRNN(32), # Only return last output
+    #     layers.Dense(1) # Example: Regression output
+    # ])
+    # model.compile(optimizer='adam', loss='mse')
+    # model.summary()
+    ```
+* **Eval/Best Practices:** Evaluate based on task (e.g., MSE for forecasting, accuracy/F1 for sequence classification/labeling). Use LSTMs or GRUs instead of SimpleRNN for most practical tasks involving long sequences. Gradient clipping can help with exploding gradients.
+* **Libraries:** `TensorFlow`/`Keras`, `PyTorch`.
+* **GPU Opt:** **Crucial.** Training RNNs is computationally intensive and significantly benefits from GPU acceleration provided by deep learning frameworks (using cuDNN libraries).
+* **Math/Subtleties:** Backpropagation Through Time (BPTT), shared weights, hidden state dynamics, vanishing/exploding gradients.
+* **SOTA Improvement:** Foundational concept. Simple RNNs are rarely used directly now; LSTMs and GRUs are the standard RNN workhorses. Transformers have largely replaced RNNs as SOTA for many NLP tasks.
+
+---
+
+### 4. Long Short-Term Memory (LSTM) & Gated Recurrent Unit (GRU)
+
+* **Explanation:**
+    * **LSTM:** An advanced type of RNN specifically designed to overcome the vanishing gradient problem and learn long-range dependencies. It uses a *memory cell* and three *gates* (input, forget, output) made of sigmoid/tanh layers to regulate the flow of information into, out of, and within the cell. This allows LSTMs to selectively remember or forget information over long periods.
+    * **GRU:** A simpler variant of LSTM, introduced later. It combines the forget and input gates into a single *update gate* and merges the cell state and hidden state. It often performs similarly to LSTM but with fewer parameters, making it slightly faster to train.
+* **Tricks & Treats:** Effective at capturing long-range dependencies in sequences. Standard building blocks for many NLP and time series tasks. Bidirectional LSTMs/GRUs process sequence in both forward and backward directions, providing context from past and future, often improving performance.
+* **Caveats/Questions:** More complex than simple RNNs. More hyperparameters to tune. Can still be computationally expensive to train.
+* **Python (LSTM using `Keras`):**
+    ```python
+    from tensorflow import keras
+    from tensorflow.keras import layers
+
+    # Assume input_shape = (timesteps, features) e.g., (None, 10)
+    # model = keras.Sequential([
+    #     layers.Input(shape=(None, 10)),
+    #     # Use Bidirectional wrapper for context from both directions
+    #     layers.Bidirectional(layers.LSTM(64, return_sequences=True)),
+    #     layers.LSTM(32), # Second LSTM layer
+    #     layers.Dense(1) # Example output
+    # ])
+    # model.compile(optimizer='adam', loss='mse')
+    # model.summary()
+
+    # For GRU, simply replace layers.LSTM with layers.GRU
+    ```
+* **Eval/Best Practices:** Evaluate based on task. Often used in stacked or bidirectional configurations. Dropout can be applied (use specific `dropout` and `recurrent_dropout` parameters in Keras/PyTorch layers). Compare performance with GRUs.
+* **Libraries:** `TensorFlow`/`Keras`, `PyTorch`.
+* **GPU Opt:** **Crucial.** Benefit significantly from optimized cuDNN implementations available in deep learning frameworks.
+* **Math/Subtleties:** Gate mechanisms (sigmoid activations controlling flow, tanh for scaling inputs/outputs), cell state update equations, peephole connections (less common now).
+* **SOTA Improvement:** Were SOTA for many sequence modeling tasks before the rise of Transformers. Still widely used and effective, especially when sequence order is paramount or for certain time series tasks. Often combined with attention mechanisms or CRF layers.
+
+---
+
+### 5. NLP Applications (NER & POS Tagging)
+
+* **Explanation:** Common sequence labeling tasks in Natural Language Processing where sequential models excel.
+    * **Named Entity Recognition (NER):** Identify and classify spans of text corresponding to predefined categories like Person, Organization, Location, Date, etc. (e.g., "[Jean Dupont]\_PER worked at [Google]\_ORG in [Paris]\_LOC").
+    * **Part-of-Speech (POS) Tagging:** Assign a grammatical tag (Noun, Verb, Adjective, Adverb, Pronoun, etc.) to each word in a sentence (e.g., "The/DET dog/NOUN barks/VERB ./PUNCT").
+* **Models Used:**
+    * **Traditional:** HMMs, CRFs (CRFs generally better). Required significant feature engineering.
+    * **Deep Learning (Pre-Transformer):** Bidirectional LSTMs (BiLSTM) often combined with a final CRF layer (BiLSTM-CRF) became the standard, leveraging word embeddings (like Word2Vec, GloVe) to capture semantics.
+    * **Deep Learning (Current SOTA):** Transformer-based models (e.g., BERT, RoBERTa, XLNet) fine-tuned for NER or POS tagging achieve state-of-the-art results by leveraging large-scale pre-training and attention mechanisms for better contextual understanding.
+* **Tricks & Treats:** Sequence context is vital. BIO/BIOES tagging schemes are common for representing entity spans (Begin, Inside, Outside, End, Single). Pre-trained embeddings/models significantly boost performance.
+* **Caveats/Questions:** Ambiguity in language. Handling out-of-vocabulary words (traditional methods). Domain adaptation can be challenging. Defining entity boundaries consistently.
+* **Python Libraries:** `spaCy`, `NLTK` (provide pre-trained models and tools), `Transformers` (Hugging Face - for SOTA models), `sklearn-crfsuite`.
+* **Eval/Best Practices:**
+    * **POS Tagging:** Token-level accuracy is common.
+    * **NER:** Entity-level F1-score (exact match of boundary and type), Precision, Recall. Metrics often reported per entity type. Libraries like `seqeval` are used for evaluation.
+* **GPU Opt:** Essential for training and often beneficial for inference with large deep learning models (BiLSTM, Transformers).
+* **SOTA Improvement:** Transformers have largely surpassed previous methods, offering superior performance due to better context modeling via self-attention.
+
